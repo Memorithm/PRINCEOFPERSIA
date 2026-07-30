@@ -31,18 +31,20 @@ fn frame_cost() {
         let mut scr = Screen::new(cols, rows);
         let mut sink: Vec<u8> = Vec::with_capacity(1 << 22);
         // warm up
-        for _ in 0..20 { g.update(1.0/60.0, &Input::default()); }
+        for _ in 0..20 { g.update(1.0/120.0, &Input::default()); }
         let n = 60;
         let t0 = Instant::now();
         for _ in 0..n {
-            g.update(1.0 / 60.0, &Input::default());
+            // One rendered frame at 60 fps is two simulation steps at 120 Hz.
+            g.update(1.0 / 120.0, &Input::default());
+            g.update(1.0 / 120.0, &Input::default());
             g.draw(&mut cv, &mut layer, &mut light, ss);
             scr.blit(&cv, 0, 1, cols, vrows);
             g.draw_hud(&mut scr);
             scr.flush(&mut sink).unwrap();
         }
         let ms = t0.elapsed().as_secs_f64() * 1000.0 / n as f64;
-        let kbs = (sink.len() as f64 / 1024.0) / (n as f64 / 30.0);
+        let kbs = (sink.len() as f64 / 1024.0) / (n as f64 / 60.0);
         println!(
             "{cols}x{rows}: canvas {}x{} ss={ss:.2}  {ms:.2} ms/frame  ({:.0} fps max)  {kbs:.0} KB/s escape output",
             cv.w, cv.h, 1000.0 / ms

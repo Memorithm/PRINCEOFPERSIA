@@ -10,12 +10,20 @@ inédits, tous **plus longs que n'importe quel niveau du jeu de 1989**.
 *Capture fidèle de ce que montre un terminal de 120 × 32 : chaque cellule de
 caractère contient deux pixels indépendants.*
 
+![La même scène en vue rapprochée](docs/terminal-zoom.png)
+
+*La même scène, `+` enfoncé. Une salle entière dans 120 colonnes ne laisse au
+prince que quatre pixels de large ; la vue rapprochée lui en donne douze, et le
+dessin devient lisible. Voir [Une salle entière ou de près](#une-salle-entière-ou-de-près).*
+
 ---
 
 ## Sommaire
 
 - [Lancer le jeu](#lancer-le-jeu)
 - [Commandes](#commandes)
+- [Une salle entière ou de près](#une-salle-entière-ou-de-près)
+- [Fluidité](#fluidité)
 - [Les armes](#les-armes)
 - [Les six niveaux](#les-six-niveaux)
 - [Comment les graphismes fonctionnent](#comment-les-graphismes-fonctionnent)
@@ -62,6 +70,8 @@ Taille minimale 56 × 14 ; 120 × 32 ou plus est confortable.
 | course puis `↑` | saut en course : franchit trois dalles |
 | `↓` | s'accroupir ; `Maj`+`↓` pour descendre en se suspendant |
 | `↑` / `↓` suspendu | se hisser / lâcher prise |
+| `Maj` en chute | rattraper la corniche — y compris celle qu'on vient de quitter |
+| `+` `-` | rapprocher / éloigner la vue |
 | `Espace` ou `X` | frapper (dégaine l'épée si nécessaire) |
 | `Z` | parer |
 | `T` | lancer une dague |
@@ -71,6 +81,56 @@ Taille minimale 56 × 14 ; 120 × 32 ou plus est confortable.
 | `P` / `Échap` | pause · `R` recommencer le niveau · `F1` aide · `Q` quitter |
 
 `W` `A` `S` `D` doublent les flèches.
+
+## Une salle entière ou de près
+
+Un terminal de 120 colonnes affichant une salle complète de 10 dalles donne
+0,375 pixel par pixel d'image : le prince y mesure **4 pixels de large sur 11 de
+haut**. Aucun dessin ne survit à ça — ni le visage, ni les bras, ni les bottes.
+
+Le jeu propose donc deux cadrages, `+` et `-` pour passer de l'un à l'autre :
+
+| Vue | Cadrage | Taille du prince (120 colonnes) |
+|---|---|---|
+| **x1** (défaut) | une salle entière, comme l'original | 4 × 11 px |
+| **x1,4 … x3** | la caméra suit le prince | jusqu'à 12 × 30 px |
+
+La vue x1 reste le défaut parce que voir la salle entière fait partie du *design*
+de Prince of Persia : on repère la herse, la fosse et le garde avant de s'élancer.
+Mais quand le calcul montre que le personnage tomberait sous 16 pixels de haut, le
+jeu le signale dans la barre de messages au début du niveau. La vue rapprochée ne
+descend jamais sous cinq dalles visibles : au-delà on ne verrait plus sur quoi on
+saute. Sur un terminal large (200 colonnes et plus) la vue x1 suffit déjà.
+
+`--view <N>` choisit le cadrage au lancement, y compris pour les captures.
+
+## Fluidité
+
+- **Simulation à pas fixe, 120 Hz.** La physique avance toujours par pas de
+  1/120 s, quel que soit le rythme d'affichage : l'arc d'un saut en course et la
+  cadence d'une lame sont identiques d'une partie à l'autre, et le mouvement reste
+  fluide même quand le terminal n'arrive pas à suivre le dessin. Les touches à
+  déclenchement unique ne sont données qu'au premier pas d'une image, donc un appui
+  reste une action quel que soit le nombre de pas.
+- **Affichage adaptatif.** 60 images par seconde jusqu'à 5 000 cellules, 45
+  jusqu'à 12 000, 30 au-delà — chaque image coûte des séquences d'échappement à
+  peu près proportionnelles au nombre de cellules, et un très grand terminal est
+  donc redessiné moins souvent plutôt que de saturer la liaison. Le mouvement ne
+  change pas : c'est la simulation qui le porte.
+- **Aucune transition ne coupe.** Le changement d'état gèle la pose qu'on quitte
+  et la fond vers la nouvelle en 85 ms. Il n'y a plus un seul saut d'animation
+  entre courir, déraper, sauter, se hisser ou dégainer.
+- **Le cycle de course est piloté par la distance parcourue**, pas par le temps.
+  Les pieds ne patinent donc jamais — ni à l'accélération, ni sous potion de
+  célérité, ni contre un mur.
+- **Le demi-tour est un mouvement.** L'orientation visible est interpolée et sa
+  *magnitude* comprime la figure horizontalement : le prince passe par une pose
+  de profil écrasé au lieu de se retourner d'un coup comme un miroir.
+- **Les appuis sont mémorisés 180 ms.** Un saut demandé pendant un dérapage ou une
+  réception part dès que l'animation le permet, au lieu d'être avalé — et un saut
+  en attente écourte le dérapage.
+- **Rattrapage de corniche.** Sortir d'un bord en courant puis presser `Maj`
+  attrape le rebord qu'on vient de quitter, en se retournant pour lui faire face.
 
 ## Les armes
 
@@ -133,18 +193,34 @@ disponibles par un filtre boîte qui moyenne dans un espace *quasi linéaire*
 Le résultat est un anticrénelage réel, pas du « graphisme de caractères ».
 
 **Personnages articulés, pas des sprites.** Chaque personnage est un petit
-squelette — bassin, torse, tête, deux bras, deux jambes — dessiné avec des
-capsules effilées et des polygones anticrénelés. Les animations sont des poses
-articulaires interpolées. C'est ce qui rend praticable d'avoir la course, le
-saut, l'escalade, la suspension, la boisson, trois gardes d'escrime et cinq
-morphologies (prince, garde, geôlier obèse, squelette, Jaffar en robe) qui se
-ressemblent toutes.
+squelette — bassin, torse, tête, deux bras, deux jambes — et les animations sont
+des poses articulaires interpolées. C'est ce qui rend praticable d'avoir la
+course, le saut, l'escalade, la suspension, la boisson, trois gardes d'escrime et
+cinq morphologies (prince, garde, geôlier obèse, squelette, Jaffar en robe) qui
+se ressemblent toutes.
+
+**Éclairage de forme.** Une capsule remplie d'une seule couleur se lit comme une
+pastille plate. Chaque membre est donc ombré *en travers* de son axe, comme un
+cylindre éclairé d'une direction fixe ; chaque tête est ombrée comme une sphère ;
+chaque pièce de tissu est un polygone à dégradé directionnel. C'est ce qui donne
+du volume aux figures, et c'est ce qui survit à la réduction : à douze pixels de
+haut il ne reste que la silhouette et la structure des valeurs — tunique claire,
+peau moyenne, cheveux et bottes sombres — et elles restent justes.
+
+Le reste est de la construction : bottes en talon-semelle-pointe, mains en coin,
+manches à ourlet, encolure en V, tunique à ourlet ondulant dont le balancement
+suit les jambes, écharpe avec son nœud et son pan qui traîne, cheveux en une seule
+forme voulue plutôt qu'en amas de cercles, et un visage dont le sourcil fait plus
+pour la lisibilité que n'importe quel modelé.
 
 Chaque figure est peinte dans un calque de couverture séparé, la couverture est
 dilatée d'un pixel ou deux, et l'anneau qui apparaît autour reçoit la couleur du
 contour. C'est ce qui donne aux silhouettes leur lisibilité sur une brique
 chargée — dessiner directement sur le canevas mettrait des contours *entre* les
-membres.
+membres. Les membres du côté opposé sont en plus assombris, désaturés et refroidis,
+de sorte que les membres proches avancent sans qu'il faille un trait entre eux.
+
+![Un squelette dans la tour de l'alchimiste](docs/skeleton.png)
 
 **Éclairage en une passe.** La scène est d'abord peinte à pleine luminosité,
 puis multipliée par un champ lumineux échantillonné bilinéairement (torches avec
@@ -167,14 +243,15 @@ est imperceptible (≤ 3 par canal) sont laissées telles quelles, et une bande 
 lignes tournante est repeinte inconditionnellement pour qu'aucune dérive ne
 s'installe. Mesuré sur cette machine :
 
-| Terminal | Canevas | ms / image | Sortie |
-|---|---|---|---|
-| 100 × 30 | 640 × 345 | 14,2 | 382 Ko/s |
-| 120 × 32 | 640 × 309 | 12,2 | 464 Ko/s |
-| 200 × 50 | 640 × 300 | 12,5 | 1,2 Mo/s |
-| 280 × 70 | 640 × 306 | 13,9 | 2,2 Mo/s |
+| Terminal | Canevas | ms / image | Images/s visées | Sortie |
+|---|---|---|---|---|
+| 100 × 30 | 640 × 345 | 13,8 | 60 | 0,9 Mo/s |
+| 120 × 32 | 640 × 309 | 12,2 | 60 | 1,1 Mo/s |
+| 200 × 50 | 640 × 300 | 12,5 | 45 | 2,2 Mo/s |
+| 280 × 70 | 640 × 306 | 13,7 | 30 | 2,7 Mo/s |
 
-Le jeu vise 30 images par seconde, il y a donc largement de la marge.
+Douze à quatorze millisecondes par image laissent la marge nécessaire pour tenir
+60 images par seconde sur un terminal courant.
 `cargo test --release --test bench -- --nocapture` refait la mesure.
 
 ## Écrire un niveau
@@ -220,7 +297,8 @@ pop --validate                 # analyse les six niveaux : parsing + accessibili
 pop --map 3                    # carte ASCII, cellules atteignables marquées
 pop --shot vue.png --level 6 --at 84,2      # capture PNG en pleine résolution
 pop --tty-shot term.png --cells 120x32      # capture telle que l'affiche un terminal
-pop --shot pose.png --pose strike --size 1280x480   # inspecter une pose
+pop --shot pose.png --pose strike --view 3 --size 640x240   # inspecter une pose
+pop --view 2 --level 5         # jouer en vue rapprochée
 pop --help
 ```
 
@@ -235,7 +313,7 @@ src/
   util.rs            vecteurs, interpolations, RNG déterministe, hachage stable
   gfx/
     color.rs         couleur 24 bits, accumulateur à correction gamma
-    target.rs        primitives anticrénelées : capsules effilées, polygones, halos
+    target.rs        primitives anticrénelées + éclairage de forme (cylindre, sphère)
     canvas.rs        canevas de scène, champ lumineux, vignette, tramage, réduction
     layer.rs         calque de couverture pour les silhouettes contournées
     particles.rs     poussière, sang, gravats, étincelles, flammes, fumée
@@ -254,14 +332,14 @@ src/
     dynamics.rs      état animé par cellule (herses, pointes, lames, dalles)
     reach.rs         vérificateur d'accessibilité
   game/
-    mod.rs           état de jeu, pas de simulation, mécanismes
-    player.rs        machine à états du prince
+    mod.rs           état de jeu, pas de simulation, mécanismes, caméra
+    player.rs        machine à états du prince, fondu de poses, allure, mémoire
     guard.rs         intelligence des gardes, escrime
     combat.rs        armes, projectiles, résolution des dégâts
     render.rs        composition de la scène
     hud.rs           affichage tête haute
   input.rs           clavier, protocole étendu et repli par maintien
-  app.rs             boucle de jeu, menus, incrustations
+  app.rs             boucle à pas fixe, cadence adaptative, cadrage, menus
 ```
 
 ### Géométrie du monde
@@ -278,7 +356,7 @@ dessous ; les deux cas sont dessinés de la même façon, et c'est ce qui met
 
 [`FLOOR_H`]: src/world/tile.rs
 
-### Une différence assumée avec l'original
+### Deux différences assumées avec l'original
 
 Le saut en course franchit trois dalles comme dans le jeu de 1989, mais il part
 d'un arc plus long et plus plat, avec sa propre gravité. Un terminal donne
@@ -286,10 +364,20 @@ beaucoup moins de précision de synchronisation qu'un joystick : l'appel peut
 donc se faire n'importe où dans la dernière dalle avant le vide, au lieu d'exiger
 une image précise.
 
+Le cadrage par défaut montre une salle entière, comme l'original ; mais `+`
+rapproche la caméra, qui se met alors à suivre le prince. Sur un terminal de 120
+colonnes c'est la différence entre un personnage de quatre pixels de large et un
+personnage qu'on voit courir.
+
+Une contrainte du moteur est verrouillée par un test plutôt que par un commentaire :
+`HANG_DROP` — la hauteur à laquelle le prince pend sous une corniche — doit valoir
+exactement la portée de ses bras tendus, sans quoi ses mains flottent à côté du
+rebord qu'il est censé agripper. Rien d'autre ne relie ces deux nombres.
+
 ## Tests
 
 ```sh
-cargo test              # 27 tests
+cargo test              # 33 tests
 cargo test --release    # même chose, en plus rapide
 ```
 
@@ -303,10 +391,19 @@ scriptées sur des cartes construites pour l'occasion : il court, s'arrête, fai
 pas prudent de moins d'une dalle, se hisse d'un niveau, franchit une fosse de
 trois dalles, tombe et atterrit, casse une dalle molle, meurt sur les pointes,
 ouvre une herse avec une dalle, se cogne à une herse fermée, ramasse l'épée, boit
-une potion, tue un garde et lance une dague. Puis un balayage de robustesse :
-4 000 images d'entrées aléatoires sur les six niveaux, en vérifiant que la
-position reste finie, que le prince ne sort pas du monde, ne se retrouve jamais à
-l'intérieur de la maçonnerie, et que le rendu d'une image ne panique pas.
+une potion, tue un garde et lance une dague.
+
+Et sur la fluidité et le gréement : la portée des bras égale `HANG_DROP`, une
+suspension place bien les mains sur le rebord, aucun changement d'état ne fait
+sauter la pose, le cycle de course avance par distance et non par pas de temps
+(deux simulations du même trajet à 60 et 120 Hz donnent la même phase), un saut
+demandé pendant un dérapage n'est pas perdu, et la caméra rapprochée ne sort
+jamais du niveau.
+
+Puis un balayage de robustesse : 4 000 images d'entrées aléatoires sur les six
+niveaux, en vérifiant que la position reste finie, que le prince ne sort pas du
+monde, ne se retrouve jamais à l'intérieur de la maçonnerie, et que le rendu d'une
+image ne panique pas.
 
 **Budget d'image** (`tests/bench.rs`) — mesure le coût par image et la bande
 passante d'échappement pour quatre tailles de terminal.

@@ -98,7 +98,7 @@ impl Game {
                 &g.style(),
                 &g.pose(),
                 v2(g.p.x, g.p.y),
-                g.facing,
+                g.facing_vis,
                 g.blade(),
                 alpha,
             );
@@ -123,11 +123,11 @@ impl Game {
             cv,
             layer,
             &cam,
-            &Prop::PRINCE.scaled(0.88, 1.0),
+            &Prop::PRINCE,
             &pstyle,
             &pl.pose(),
             v2(pl.p.x, pl.p.y),
-            pl.facing,
+            pl.facing_vis,
             pl.blade(),
             flicker,
         );

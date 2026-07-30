@@ -31,9 +31,13 @@ pub const ROOM_TH: i32 = 3;
 pub const ROOM_W: f32 = TILE_W * ROOM_TW as f32;
 pub const ROOM_H: f32 = TILE_H * ROOM_TH as f32;
 
-/// How far below a ledge a hanging character's base sits. Tuned so the hands in
-/// the hang pose land exactly on the ledge lip.
-pub const HANG_DROP: f32 = 30.0;
+/// How far below a ledge a hanging character's base sits.
+///
+/// This has to equal how far the prince's hands reach above his feet with the
+/// arms straight up ([`crate::art::skel::Prop::reach_up`], 31.2 art pixels for
+/// [`crate::art::skel::Prop::PRINCE`]) — otherwise the hands float off the ledge
+/// they are supposed to be gripping. A test pins the two together.
+pub const HANG_DROP: f32 = 31.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tile {

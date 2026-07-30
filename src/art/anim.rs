@@ -113,12 +113,12 @@ pub fn anims() -> &'static Anims {
 
 fn build() -> Anims {
     // ---------------------------------------------------------- idle
-    let stand_a = ps(13.2, 0.2, -2.0, 2.0, (7.0, 14.0), (-4.0, 11.0), (3.0, 3.0), (-6.0, 9.0));
-    let stand_b = ps(12.9, 0.2, -1.0, 3.0, (5.0, 12.0), (-3.0, 9.0), (3.0, 3.0), (-6.0, 9.0));
+    let stand_a = ps(13.6, 0.3, -3.0, 3.0, (7.0, 17.0), (-15.0, 15.0), (11.0, 15.0), (-9.0, 8.0));
+    let stand_b = ps(13.4, 0.3, -1.5, 4.0, (5.0, 15.0), (-12.0, 13.0), (11.0, 15.0), (-9.0, 8.0));
     let stand = Clip::new(vec![(stand_a, 1.6), (stand_b, 1.6)], true);
 
-    let alert = ps(12.7, 0.9, 6.0, -3.0, (22.0, 42.0), (-14.0, 34.0), (9.0, 6.0), (-11.0, 16.0));
-    let alert_b = ps(12.5, 1.0, 8.0, -4.0, (26.0, 46.0), (-16.0, 38.0), (10.0, 7.0), (-12.0, 18.0));
+    let alert = ps(13.0, 0.9, 6.0, -3.0, (28.0, 44.0), (-20.0, 30.0), (13.0, 14.0), (-13.0, 14.0));
+    let alert_b = ps(12.8, 1.0, 8.0, -4.0, (32.0, 48.0), (-22.0, 34.0), (15.0, 16.0), (-15.0, 16.0));
     let stand_alert = Clip::new(vec![(alert, 0.5), (alert_b, 0.5)], true);
 
     // ---------------------------------------------------------- turning
@@ -307,12 +307,13 @@ fn build() -> Anims {
     );
 
     // ---------------------------------------------------------- hanging & climbing
-    // The hang pose is tuned so the hands sit exactly on the ledge when the
-    // character's base is 30 art pixels below it (see HANG_DROP).
+    // Hanging: legs straight, arms straight up. The reach this produces is what
+    // HANG_DROP is set to, so the hands land exactly on the ledge lip — a test
+    // pins the two together.
     let hang_a =
-        ps(10.5, -0.6, -4.0, 6.0, (168.0, 8.0), (172.0, 10.0), (-4.0, 6.0), (5.0, 14.0));
+        ps(13.0, -0.5, -2.0, 6.0, (172.0, 6.0), (176.0, 8.0), (1.0, 2.0), (-2.0, 5.0));
     let hang_b =
-        ps(10.2, -0.6, -6.0, 7.0, (170.0, 10.0), (174.0, 12.0), (2.0, 10.0), (-3.0, 18.0));
+        ps(12.8, -0.5, -4.0, 7.0, (174.0, 7.0), (178.0, 9.0), (4.0, 4.0), (-5.0, 8.0));
     let hang = Clip::new(vec![(hang_a, 1.1), (hang_b, 1.1)], true);
 
     let climb = Clip::new(

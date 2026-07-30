@@ -82,6 +82,8 @@ impl Input {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Cmd {
     Quit,
+    ZoomIn,
+    ZoomOut,
     Pause,
     Restart,
     Help,
@@ -154,6 +156,8 @@ impl Reader {
                 KeyCode::Tab => Some(Cmd::NextWeapon),
                 KeyCode::Enter => Some(Cmd::Confirm),
                 KeyCode::Char('n') | KeyCode::Char('N') => Some(Cmd::Skip),
+                KeyCode::Char('+') | KeyCode::Char('=') => Some(Cmd::ZoomIn),
+                KeyCode::Char('-') | KeyCode::Char('_') => Some(Cmd::ZoomOut),
                 _ => None,
             };
             if let Some(c) = cmd {

@@ -25,6 +25,7 @@ OPTIONS
         --shot <FICHIER>   écrire une capture PNG au lieu de jouer
         --tty-shot <FIC>   capture PNG telle que l'affiche un terminal
         --cells <CxL>      (avec --tty-shot) taille du terminal simulé
+        --view <N>         grossissement : 1 = une salle entière, jusqu'à 3
         --room <X,Y>       (avec --shot) salle à cadrer
         --at <TX,TY>       (avec --shot) placer le prince sur cette tuile
         --pose <NOM>       (avec --shot) pose du prince : stand run jump fall
@@ -57,6 +58,7 @@ fn main() {
     let mut size: Option<(i32, i32)> = None;
     let mut zoom = 2i32;
     let mut cells: Option<(i32, i32)> = None;
+    let mut view = 1.0f32;
 
     let mut i = 0;
     while i < args.len() {
@@ -86,6 +88,7 @@ fn main() {
                 shot = next(&mut i);
             }
             "--cells" => cells = parse_size(&next(&mut i)),
+            "--view" => view = next(&mut i).parse().unwrap_or(1.0),
             "--room" => room = parse_pair(&next(&mut i)),
             "--at" => at = parse_pair(&next(&mut i)),
             "--pose" => pose = next(&mut i),
@@ -105,7 +108,7 @@ fn main() {
 
     match mode {
         Mode::Play => {
-            if let Err(e) = app::play(idx, seed) {
+            if let Err(e) = app::play(idx, seed, view) {
                 eprintln!("erreur : {e}");
                 std::process::exit(1);
             }
@@ -138,14 +141,14 @@ fn main() {
             }
         },
         Mode::Shot => {
-            if let Err(e) = screenshot(idx, seed, &shot, room, at, &pose, frames, size, zoom) {
+            if let Err(e) = screenshot(idx, seed, &shot, room, at, &pose, frames, size, zoom, view) {
                 eprintln!("erreur : {e}");
                 std::process::exit(1);
             }
         }
         Mode::TtyShot => {
             let (c, r) = cells.unwrap_or((120, 32));
-            if let Err(e) = tty_shot(idx, seed, &shot, at, c, r, frames, zoom) {
+            if let Err(e) = tty_shot(idx, seed, &shot, at, c, r, frames, zoom, view) {
                 eprintln!("erreur : {e}");
                 std::process::exit(1);
             }
@@ -175,6 +178,7 @@ fn tty_shot(
     rows: i32,
     frames: i32,
     zoom: i32,
+    view: f32,
 ) -> std::io::Result<()> {
     use gfx::term::{Screen, HALF};
     use world::tile::{ROOM_H, ROOM_W};
@@ -195,16 +199,18 @@ fn tty_shot(
     } else {
         (ROOM_W, ROOM_W / aspect)
     };
+    let view = view.clamp(1.0, 3.0);
+    let (vw, vh) = (vw / view, vh / view);
+    g.zoom = view;
     g.set_view_size(vw, vh);
-    let rr = g.room_rect(g.cam.room);
-    g.cam.at = util::v2(rr.0 + (ROOM_W - vw) * 0.5, rr.1 + (ROOM_H - vh) * 0.5);
-    g.cam.target = g.cam.at;
+    g.centre_camera();
     let input = input::Input::default();
     for _ in 0..frames.max(0) {
         g.update(1.0 / 30.0, &input);
     }
     if let Some((tx, ty)) = at {
         g.player.p = util::v2(Level::cx(tx), Level::surf(ty));
+        g.centre_camera();
     }
 
     let ss = (pw as f32 / vw * 1.4).clamp(2.0, 3.5);
@@ -310,6 +316,7 @@ fn screenshot(
     frames: i32,
     size: Option<(i32, i32)>,
     zoom: i32,
+    view: f32,
 ) -> std::io::Result<()> {
     let mut g = Game::new(idx, Carry::default(), seed)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
@@ -321,16 +328,13 @@ fn screenshot(
         g.cam.room = (r.0, r.1);
     }
     let (pw, ph) = size.unwrap_or((640, 240));
+    let view = view.clamp(1.0, 4.0);
+    g.zoom = view;
     g.set_view_size(
-        world::tile::ROOM_H * pw as f32 / ph as f32,
-        world::tile::ROOM_H,
+        world::tile::ROOM_H * pw as f32 / ph as f32 / view,
+        world::tile::ROOM_H / view,
     );
-    let rr = g.room_rect(g.cam.room);
-    g.cam.at = util::v2(
-        rr.0 + (world::tile::ROOM_W - g.view_w) * 0.5,
-        rr.1 + (world::tile::ROOM_H - g.view_h) * 0.5,
-    );
-    g.cam.target = g.cam.at;
+    g.centre_camera();
 
     // Let the world breathe so torches have flames and gates have settled.
     let input = input::Input::default();
@@ -339,6 +343,7 @@ fn screenshot(
     }
     if let Some((tx, ty)) = at {
         g.player.p = util::v2(Level::cx(tx), Level::surf(ty));
+        g.centre_camera();
     }
     if !pose.is_empty() {
         g.player.st = match pose {
@@ -367,7 +372,9 @@ fn screenshot(
         g.player.t = clip.total() / rate.abs().max(0.01) * 0.45;
     }
 
-    let ss = (pw as f32 / g.view_w).clamp(1.0, 4.0).max(2.0);
+    // Art review wants a crisp canvas, so allow a much higher super-sample
+    // factor here than the interactive renderer uses.
+    let ss = (pw as f32 / g.view_w).clamp(2.0, 8.0);
     let mut cv = Canvas::new((g.view_w * ss) as i32, (g.view_h * ss) as i32);
     let mut layer = Layer::new();
     let mut light = LightField::new();
