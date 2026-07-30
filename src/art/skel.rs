@@ -1,13 +1,18 @@
 //! Articulated figure rendering.
 //!
 //! Rather than storing a few dozen hand-drawn sprite sheets, every character in
-//! the game is a small skeleton — hip, torso, head, two arms, two legs — drawn
-//! with anti-aliased primitives that are shaded as *solids*: each limb is a
-//! cylinder lit from a fixed direction, each head a sphere, each piece of cloth a
-//! polygon with a directional gradient. That form lighting is what stops the
-//! figures reading as flat lozenges, and it is what survives being squeezed down
-//! to a dozen terminal pixels — the silhouette stays clean and the value
-//! structure (bright tunic, mid skin, dark hair and boots) still reads.
+//! the game is a small skeleton — hip, torso, head, two arms, two legs — that is
+//! *drawn* each frame rather than assembled from primitives. Each bone carries an
+//! authored [silhouette profile](crate::art::shape::Profile) so an arm swells at
+//! the deltoid and pinches at the elbow, each is cel-shaded with a hard-edged
+//! core shadow and a thin lit rim, and heads, hands, hair and cloth are authored
+//! polygons rather than ellipses. Where two forms of the same colour overlap —
+//! the near arm against the chest, the sash against the belly — a drawn contour
+//! separates them.
+//!
+//! That combination is what survives being squeezed down to a dozen terminal
+//! pixels: the silhouette stays deliberate and the value structure (bright sash,
+//! mid skin, dark hair and boots) still reads.
 //!
 //! Animations are keyframed joint angles, which is what makes it practical to
 //! have running, jumping, climbing, hanging, drinking, three sword stances and
@@ -19,13 +24,11 @@
 //! meaning the natural direction (heel towards the back, forearm towards the
 //! front).
 
+use crate::art::shape::{self, Limb};
 use crate::gfx::canvas::Cam;
 use crate::gfx::color::{rgb, Rgb};
 use crate::gfx::layer::Layer;
-use crate::gfx::target::{
-    fill_capsule, fill_circle, fill_ellipse, fill_ellipse_lit, fill_capsule_lit, fill_poly,
-    fill_poly_dir,
-};
+use crate::gfx::target::{fill_capsule, fill_circle};
 use crate::util::{clampf, dir_down, dir_up, lerp, v2, V2};
 
 // ---------------------------------------------------------------- pose
@@ -153,13 +156,13 @@ impl Prop {
         shin: 6.8,
         foot: 3.2,
         torso: 7.4,
-        neck: 1.5,
-        head_r: 2.45,
+        neck: 1.15,
+        head_r: 2.10,
         upper: 5.3,
         fore: 4.8,
         hand: 1.5,
-        chest: 3.05,
-        waist: 2.15,
+        chest: 2.60,
+        waist: 2.05,
         scale: 1.0,
         girth: 1.0,
     };
@@ -380,13 +383,13 @@ pub struct Style {
 
 impl Style {
     pub const PRINCE: Style = Style {
-        skin: rgb(222, 168, 120),
+        skin: rgb(226, 172, 124),
         skin_dk: rgb(150, 96, 62),
         cloth: rgb(238, 236, 226),
         cloth_dk: rgb(150, 152, 166),
-        sash: rgb(186, 46, 46),
+        sash: rgb(190, 48, 48),
         sash_dk: rgb(104, 20, 26),
-        hair: rgb(74, 48, 34),
+        hair: rgb(70, 44, 32),
         boot: rgb(126, 78, 44),
         metal: rgb(198, 208, 222),
         outline: rgb(20, 16, 28),
@@ -408,8 +411,73 @@ impl Style {
 /// Colour treatment for limbs on the far side of the body: darker, cooler and a
 /// little desaturated, so the near limbs come forward without needing an outline
 /// drawn between them.
+///
+/// This has to land *below* the core shadow of the torso, or the depth order
+/// reads backwards and the far arm appears to float in front of the chest. That
+/// is the single easiest way to make a figure look wrong.
 fn recede(c: Rgb) -> Rgb {
-    c.scale(0.60).desaturate(0.22).lerp(rgb(26, 24, 42), 0.14)
+    c.scale(0.48).desaturate(0.26).lerp(rgb(26, 24, 42), 0.18)
+}
+
+// ---------------------------------------------------------------- device frame
+
+/// The figure projected into device pixels once, at the top of the frame.
+///
+/// Everything below draws in these coordinates: profiles are scaled by a girth
+/// that is already in pixels, and authored polygons are placed in local frames
+/// built from `fwd`/`up`. Working this way means a figure four pixels wide and one
+/// forty pixels wide go through exactly the same code, and no drawing routine
+/// needs to know the camera exists.
+struct Dev {
+    hip: V2,
+    knee: [V2; 2],
+    ankle: [V2; 2],
+    toe: [V2; 2],
+    shoulder: V2,
+    elbow: [V2; 2],
+    hand: [V2; 2],
+    neck: V2,
+    head: V2,
+    /// Head radius, px.
+    hr: f32,
+    /// One art pixel of limb girth, px.
+    g: f32,
+    /// One art pixel of length, px.
+    u: f32,
+    /// Chest half-depth, px.
+    chest: f32,
+    /// Hip-to-shoulder distance, px.
+    tl: f32,
+    up: V2,
+    fwd: V2,
+    facing: f32,
+    hand_dir: V2,
+    heavy: bool,
+}
+
+fn dev(cam: &Cam, f: &Figure) -> Dev {
+    let s = f.prop.scale;
+    Dev {
+        hip: cam.p(f.hip),
+        knee: [cam.p(f.knee[0]), cam.p(f.knee[1])],
+        ankle: [cam.p(f.ankle[0]), cam.p(f.ankle[1])],
+        toe: [cam.p(f.toe[0]), cam.p(f.toe[1])],
+        shoulder: cam.p(f.shoulder),
+        elbow: [cam.p(f.elbow[0]), cam.p(f.elbow[1])],
+        hand: [cam.p(f.hand[0]), cam.p(f.hand[1])],
+        neck: cam.p(f.neck),
+        head: cam.p(f.head),
+        hr: cam.l(f.head_r),
+        g: cam.l(f.prop.girth * s),
+        u: cam.l(s),
+        chest: cam.l(f.prop.chest * f.prop.girth * s),
+        tl: cam.p(f.shoulder).sub(cam.p(f.hip)).len().max(1.0),
+        up: f.up,
+        fwd: f.fwd,
+        facing: f.facing,
+        hand_dir: f.hand_dir,
+        heavy: f.prop.girth > 1.20,
+    }
 }
 
 // ---------------------------------------------------------------- drawing
@@ -424,466 +492,444 @@ pub fn draw_figure(
     pose: &Pose,
     blade: Blade,
 ) {
-    // Form light: from above and slightly in front, so the face and chest catch
+    // Key light from above and a little in front, so the face and the chest catch
     // it whichever way the character faces.
-    let light = v2(f.facing * 0.42, -0.91).norm();
+    let light = v2(f.facing * 0.40, -0.92).norm();
+    let d = dev(cam, f);
 
     if st.bones {
-        draw_bones(layer, cam, f, st, pose, blade, light);
+        draw_bones(layer, &d, st, pose, blade, light);
         return;
     }
 
     // --- far side ------------------------------------------------------
-    draw_leg(layer, cam, f, st, 1, light, true);
-    draw_arm(layer, cam, f, st, 1, light, true);
+    draw_leg(layer, &d, st, 1, light, true);
+    draw_arm(layer, &d, st, 1, light, true);
     if let Some(sc) = st.shield {
-        let g = f.prop.girth * f.prop.scale;
-        let c = cam.p(f.hand[1]);
-        fill_ellipse_lit(layer, c, cam.l(4.8 * g), cam.l(4.4 * g), recede(sc), light, 1.0);
-        fill_ellipse_lit(
-            layer,
-            c,
-            cam.l(1.8 * g),
-            cam.l(1.7 * g),
-            recede(st.metal),
-            light,
-            1.0,
-        );
+        draw_shield(layer, &d, st, sc, light);
     }
-    draw_scarf(layer, cam, f, st, pose);
-    draw_sash_tail(layer, cam, f, st, pose);
+    draw_scarf(layer, &d, st, pose);
+    draw_sash_tail(layer, &d, st, pose);
 
-    // --- near leg, torso, then the tunic over the thighs ----------------
-    draw_leg(layer, cam, f, st, 0, light, false);
-    draw_torso(layer, cam, f, st, light);
+    // --- near leg, torso, then the garment over the thighs --------------
+    draw_leg(layer, &d, st, 0, light, false);
+    draw_torso(layer, &d, st, light);
     if st.robe > 0.01 {
-        draw_tunic(layer, cam, f, st, pose, light);
+        draw_tunic(layer, &d, st, pose, light);
     }
-    draw_sash(layer, cam, f, st, light);
+    draw_sash(layer, &d, st, light);
 
     // --- head ----------------------------------------------------------
-    draw_head(layer, cam, f, st, light);
+    draw_head(layer, &d, st, light);
 
     // --- near arm and weapon -------------------------------------------
-    draw_arm(layer, cam, f, st, 0, light, false);
-    draw_blade(layer, cam, f, st, pose, blade);
+    draw_arm(layer, &d, st, 0, light, false);
+    draw_blade(layer, &d, st, pose, blade, light);
 }
 
-// ---------------------------------------------------------------- limbs
+// ---------------------------------------------------------------- legs
 
-fn draw_leg(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, i: usize, light: V2, far: bool) {
-    let g = f.prop.girth * f.prop.scale;
+fn draw_leg(layer: &mut Layer, d: &Dev, st: &Style, i: usize, light: V2, far: bool) {
+    let g = d.g;
     let tint = |c: Rgb| if far { recede(c) } else { c };
-    // Trousers are the tunic cloth a touch deeper, so the legs separate from the
-    // skirt hanging over them.
     let trouser = tint(st.trouser);
     let boot = tint(st.boot);
-    // Loose trousers widen towards the knee and gather at the ankle, which is the
-    // silhouette the reference art has.
-    let b = clampf(st.baggy, 0.0, 1.0);
-    let th0 = 1.82 + 0.46 * b;
-    let th1 = 1.46 + 1.44 * b;
-    let sh0 = 1.36 + 1.62 * b;
-    let sh1 = 0.98 + 0.10 * b;
+
+    let (hip, knee, ankle, toe) = (d.hip, d.knee[i], d.ankle[i], d.toe[i]);
+    let loose = st.baggy > 0.15;
+    let (pt, pc) = if loose {
+        (shape::THIGH_BAGGY, shape::CALF_BAGGY)
+    } else {
+        (shape::THIGH, shape::CALF)
+    };
+    let thigh = Limb::new(hip, knee, shape::front_of(hip, knee, d.facing), pt, g).steps(9);
+    let calf = Limb::new(knee, ankle, shape::front_of(knee, ankle, d.facing), pc, g).steps(9);
+
+    // The near leg gets a drawn edge so it separates from the far one even where
+    // the two overlap and the recede tint is not enough on its own.
     if !far {
-        let rim = st.trouser.scale(0.30);
-        let e = 0.42 * g;
-        fill_capsule(
-            layer,
-            cam.p(f.hip),
-            cam.p(f.knee[i]),
-            cam.l(th0 * g) + e,
-            cam.l(th1 * g) + e,
-            rim,
-            1.0,
-        );
-        fill_capsule(
-            layer,
-            cam.p(f.knee[i]),
-            cam.p(f.ankle[i]),
-            cam.l(sh0 * g) + e,
-            cam.l(sh1 * g) + e,
-            rim,
-            1.0,
-        );
+        let e = 0.34 * g;
+        let dk = st.trouser.scale(0.26);
+        thigh.edge(layer, e, dk, 1.0);
+        calf.edge(layer, e, dk, 1.0);
     }
+    thigh.draw(layer, trouser, light);
+    calf.draw(layer, trouser, light);
 
-    fill_capsule_lit(
-        layer,
-        cam.p(f.hip),
-        cam.p(f.knee[i]),
-        cam.l(th0 * g),
-        cam.l(th1 * g),
-        trouser,
-        light,
-        1.0,
-    );
-    // A slight bulge at the knee, so the joint is not a hinge.
-    fill_ellipse_lit(
-        layer,
-        cam.p(f.knee[i]),
-        cam.l(th1.max(sh0) * g),
-        cam.l(th1.max(sh0) * g),
-        trouser,
-        light,
-        1.0,
-    );
-    fill_capsule_lit(
-        layer,
-        cam.p(f.knee[i]),
-        cam.p(f.ankle[i]),
-        cam.l(sh0 * g),
-        cam.l(sh1 * g),
-        trouser,
-        light,
-        1.0,
-    );
-    // Where loose cloth is gathered into the boot.
-    if b > 0.15 {
-        let a = f.ankle[i];
-        let dirn = a.sub(f.knee[i]).norm();
-        let per = dirn.perp();
-        let cuff = a.sub(dirn.mul(1.3 * g));
-        fill_capsule_lit(
-            layer,
-            cam.p(cuff.add(per.mul((sh1 + 0.5 * b) * g))),
-            cam.p(cuff.sub(per.mul((sh1 + 0.5 * b) * g))),
-            cam.l(0.55 * g),
-            cam.l(0.55 * g),
-            trouser.scale(0.78),
-            light,
-            1.0,
-        );
-    }
-
-    // --- boot: heel, sole and toe as one shape -------------------------
-    let a = f.ankle[i];
-    let t = f.toe[i];
-    let sole = t.sub(a).norm();
-    let up = sole.perp().mul(-1.0);
-    let heel = a.sub(sole.mul(1.15 * g));
-    let pts = [
-        cam.p(heel.add(up.mul(1.95 * g))),
-        cam.p(a.add(up.mul(2.15 * g))),
-        cam.p(t.add(up.mul(0.85 * g))),
-        cam.p(t.sub(up.mul(0.38 * g))),
-        cam.p(heel.sub(up.mul(0.28 * g))),
-    ];
-    fill_poly_dir(layer, &pts, boot.scale(1.18), boot.scale(0.62), light, 1.0);
-    // Sole: a dark strip along the bottom.
-    fill_capsule(
-        layer,
-        cam.p(heel.sub(up.mul(0.15 * g))),
-        cam.p(t.sub(up.mul(0.2 * g))),
-        cam.l(0.4 * g),
-        cam.l(0.33 * g),
-        boot.scale(0.42),
-        0.9,
-    );
-    // Cuff at the top of the boot.
-    let cf = sole.mul(0.85 * g);
-    fill_capsule_lit(
-        layer,
-        cam.p(a.add(up.mul(2.0 * g)).sub(cf)),
-        cam.p(a.add(up.mul(1.8 * g)).add(cf)),
-        cam.l(0.62 * g),
-        cam.l(0.62 * g),
-        boot.scale(1.3),
-        light,
-        1.0,
-    );
-}
-
-fn draw_arm(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, i: usize, light: V2, far: bool) {
-    let g = f.prop.girth * f.prop.scale;
-    let tint = |c: Rgb| if far { recede(c) } else { c };
-    let skin = tint(st.skin);
-    // A bare-armed figure has no sleeve; a waistcoat gives only a shoulder cap.
-    let sleeved = st.vest.is_some() || !st.bare_chest;
-    let cloth = tint(st.vest.unwrap_or(if st.bare_chest { st.skin } else { st.cloth }));
-    if !far {
-        let rim = if st.bare_chest {
-            st.skin_dk.scale(0.42)
-        } else {
-            st.cloth_dk.scale(0.34)
-        };
-        let e = 0.30 * g;
-        fill_capsule(
-            layer,
-            cam.p(f.shoulder),
-            cam.p(f.elbow[i]),
-            cam.l(1.22 * g) + e,
-            cam.l(0.82 * g) + e,
-            rim,
-            1.0,
-        );
-        fill_capsule(
-            layer,
-            cam.p(f.elbow[i]),
-            cam.p(f.hand[i]),
-            cam.l(0.86 * g) + e,
-            cam.l(0.70 * g) + e,
-            rim,
-            1.0,
-        );
-    }
-
-    // Deltoid cap, so the shoulder is round rather than a stump.
-    let cap = f
-        .shoulder
-        .add(f.up.mul(0.15))
-        .add(f.fwd.mul(if i == 0 { 0.3 } else { -0.3 }));
-    fill_ellipse_lit(
-        layer,
-        cam.p(cap),
-        cam.l(1.28 * g),
-        cam.l(1.20 * g),
-        cloth,
-        light,
-        1.0,
-    );
-    // Short sleeve, with a hem.
-    let sleeve_end = f.shoulder.lerp(f.elbow[i], 0.42);
-    if sleeved {
-        fill_capsule_lit(
-            layer,
-            cam.p(f.shoulder),
-            cam.p(sleeve_end),
-            cam.l(1.22 * g),
-            cam.l(1.02 * g),
-            cloth,
-            light,
-            1.0,
-        );
-        fill_capsule(
-            layer,
-            cam.p(sleeve_end.add(f.fwd.mul(0.95 * g))),
-            cam.p(sleeve_end.sub(f.fwd.mul(0.95 * g))),
-            cam.l(0.30 * g),
-            cam.l(0.30 * g),
-            tint(if st.bare_chest { st.skin_dk } else { st.cloth_dk }),
-            0.85,
-        );
-    }
-    // Upper arm and forearm.
-    fill_capsule_lit(
-        layer,
-        cam.p(if sleeved {
-            f.shoulder.lerp(f.elbow[i], 0.44)
-        } else {
-            f.shoulder
-        }),
-        cam.p(f.elbow[i]),
-        cam.l(if sleeved { 0.98 } else { 1.16 } * g),
-        cam.l(0.82 * g),
-        skin,
-        light,
-        1.0,
-    );
-    fill_capsule_lit(
-        layer,
-        cam.p(f.elbow[i]),
-        cam.p(f.hand[i]),
-        cam.l(0.86 * g),
-        cam.l(0.68 * g),
-        skin,
-        light,
-        1.0,
-    );
-    // Hand: a small wedge rather than a ball.
-    let d = f.hand[i].sub(f.elbow[i]).norm();
-    let s = d.perp();
-    let h = f.hand[i];
-    let pts = [
-        cam.p(h.sub(d.mul(0.25 * g)).add(s.mul(0.85 * g))),
-        cam.p(h.add(d.mul(1.15 * g)).add(s.mul(0.60 * g))),
-        cam.p(h.add(d.mul(1.25 * g)).sub(s.mul(0.50 * g))),
-        cam.p(h.sub(d.mul(0.25 * g)).sub(s.mul(0.82 * g))),
-    ];
-    fill_poly_dir(layer, &pts, skin.scale(1.15), skin.scale(0.7), light, 1.0);
-}
-
-// ---------------------------------------------------------------- body
-
-fn draw_torso(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, light: V2) {
-    let g = f.prop.girth * f.prop.scale;
-    let down = f.up.mul(-1.0);
-    let body = if st.bare_chest { st.skin } else { st.cloth };
-    // One cylinder from shoulders to hips, wide at the chest and narrow at the
-    // waist; the cross-axis shading does the rest.
-    fill_capsule_lit(
-        layer,
-        cam.p(f.shoulder),
-        cam.p(f.hip),
-        cam.l(f.prop.chest * g),
-        cam.l(f.prop.waist * g),
-        body,
-        light,
-        1.0,
-    );
-
-    if st.bare_chest {
-        // Pectoral: a plate on the front of the chest with a shadow under it.
-        let pec = f
-            .shoulder
-            .add(down.mul(1.5 * g))
-            .add(f.fwd.mul(f.prop.chest * g * 0.34));
-        fill_ellipse_lit(
-            layer,
-            cam.p(pec),
-            cam.l(1.9 * g),
-            cam.l(1.45 * g),
-            st.skin.scale(1.06),
-            light,
-            1.0,
-        );
-        fill_capsule(
-            layer,
-            cam.p(pec.add(down.mul(1.35 * g)).add(f.fwd.mul(1.5 * g))),
-            cam.p(pec.add(down.mul(1.5 * g)).sub(f.fwd.mul(1.0 * g))),
-            cam.l(0.42 * g),
-            cam.l(0.34 * g),
-            st.skin_dk.scale(0.85),
-            0.55,
-        );
-        // Abdominals: two short creases down the front of the belly.
-        for k in 0..2 {
-            let a = f
-                .shoulder
-                .add(down.mul((3.6 + k as f32 * 1.5) * g))
-                .add(f.fwd.mul(f.prop.chest * g * 0.42));
-            fill_capsule(
+    if loose {
+        // Two folds running down the outside of the cloth, and the gather where it
+        // is stuffed into the boot. Without them a baggy trouser is a sack.
+        for (t0, t1, a) in [(0.18f32, 0.72f32, 0.34f32), (0.42, 0.92, 0.22)] {
+            shape::contour(
                 layer,
-                cam.p(a),
-                cam.p(a.sub(f.fwd.mul(1.5 * g))),
-                cam.l(0.3 * g),
-                cam.l(0.24 * g),
-                st.skin_dk.scale(0.9),
-                0.4,
+                thigh.dark_edge(t0, light).lerp(thigh.lit_edge(t0, light), 0.34),
+                thigh.dark_edge(t1, light).lerp(thigh.lit_edge(t1, light), 0.42),
+                0.20 * g,
+                st.trouser.scale(0.52),
+                a,
             );
         }
-        // Collarbone.
-        fill_capsule(
+        let cf = shape::front_of(knee, ankle, d.facing);
+        let cuff = ankle.lerp(knee, 0.12);
+        shape::contour(
             layer,
-            cam.p(f.shoulder.add(f.fwd.mul(f.prop.chest * g * 0.85))),
-            cam.p(f.shoulder.sub(f.fwd.mul(f.prop.chest * g * 0.5))),
-            cam.l(0.34 * g),
-            cam.l(0.30 * g),
-            st.skin.scale(1.18),
-            0.6,
-        );
-        // The hollow of the throat.
-        fill_ellipse(
-            layer,
-            cam.p(f.shoulder.add(f.up.mul(0.3 * g)).add(f.fwd.mul(0.2 * g))),
-            cam.l(0.7 * g),
-            cam.l(0.5 * g),
-            st.skin_dk.scale(0.8),
-            0.5,
+            cuff.add(cf.mul(1.05 * g)),
+            cuff.sub(cf.mul(1.05 * g)),
+            0.34 * g,
+            trouser.scale(0.72),
+            1.0,
         );
     } else {
-        // Shoulder line across the top of the chest.
-        fill_capsule(
+        // A crease behind the knee is what turns two segments into a joint.
+        let kf = shape::front_of(hip, knee, d.facing);
+        shape::contour(
             layer,
-            cam.p(f.shoulder.add(f.fwd.mul(f.prop.chest * g * 0.9))),
-            cam.p(f.shoulder.sub(f.fwd.mul(f.prop.chest * g * 0.9))),
-            cam.l(0.7 * g),
-            cam.l(0.7 * g),
+            knee.sub(kf.mul(1.20 * g)),
+            knee.sub(kf.mul(0.30 * g)),
+            0.20 * g,
+            trouser.scale(0.46),
+            0.8,
+        );
+    }
+
+    // --- boot: heel, sole and toe as one authored shape ------------------
+    let sole = toe.sub(ankle).norm();
+    // Pick the perpendicular that points up the screen, whichever way the foot
+    // faces — otherwise a left-facing character wears its boots upside down.
+    let up = {
+        let p = sole.perp();
+        if p.y <= 0.0 {
+            p
+        } else {
+            p.mul(-1.0)
+        }
+    };
+    let heel = ankle.sub(sole.mul(1.15 * g));
+    let pts = [
+        heel.add(up.mul(1.95 * g)),
+        ankle.add(up.mul(2.20 * g)),
+        toe.add(up.mul(0.95 * g)),
+        toe.add(sole.mul(0.30 * g)).sub(up.mul(0.26 * g)),
+        heel.sub(up.mul(0.30 * g)),
+        heel.sub(sole.mul(0.25 * g)).add(up.mul(0.70 * g)),
+    ];
+    shape::cel_poly(layer, &pts, boot, light, 0.40);
+    // Sole: a dark strip along the bottom.
+    shape::contour(
+        layer,
+        heel.sub(up.mul(0.16 * g)),
+        toe.sub(up.mul(0.18 * g)),
+        0.34 * g,
+        boot.scale(0.40),
+        0.95,
+    );
+    // Cuff, turned over at the top.
+    let cf = sole.mul(0.85 * g);
+    shape::contour(
+        layer,
+        ankle.add(up.mul(2.00 * g)).sub(cf),
+        ankle.add(up.mul(1.80 * g)).add(cf),
+        0.52 * g,
+        boot.scale(1.28),
+        1.0,
+    );
+}
+
+// ---------------------------------------------------------------- arms
+
+fn draw_arm(layer: &mut Layer, d: &Dev, st: &Style, i: usize, light: V2, far: bool) {
+    let g = d.g;
+    let tint = |c: Rgb| if far { recede(c) } else { c };
+    let skin = tint(st.skin);
+    let sleeved = st.vest.is_some() || !st.bare_chest;
+    let sleeve_col = tint(st.vest.unwrap_or(st.cloth));
+
+    // The two shoulder joints are not in the same place: one is nearer the viewer
+    // than the other, and the body between them is thick. Offsetting each arm
+    // along the depth axis is what pulls the far arm clear of the back and drops
+    // the near arm in front of the chest — without it a profile figure is a slab
+    // with one arm and the pose reads as a paper cut-out.
+    let off = d.fwd.mul(if far { -1.85 } else { 0.55 } * g);
+    let (sh, el, hd) = (
+        d.shoulder.add(off),
+        d.elbow[i].add(off),
+        d.hand[i].add(off),
+    );
+    let uf = shape::front_of(sh, el, d.facing);
+    let ff = shape::front_of(el, hd, d.facing);
+    let upper = Limb::new(sh, el, uf, shape::UPPER_ARM, g).steps(7);
+    let fore = Limb::new(el, hd, ff, shape::FOREARM, g).steps(7);
+
+    // The near arm crosses the chest, and chest and arm are the same colour on a
+    // bare-chested figure. The drawn edge is the only thing that keeps them apart.
+    if !far {
+        let e = 0.30 * g;
+        let dk = if st.bare_chest {
+            st.skin_dk.scale(0.42)
+        } else {
+            st.cloth_dk.scale(0.36)
+        };
+        upper.edge(layer, e, dk, 1.0);
+        fore.edge(layer, e, dk, 1.0);
+    }
+
+    upper.draw(layer, skin, light);
+    fore.draw(layer, skin, light);
+    // Crease inside the elbow.
+    shape::contour(
+        layer,
+        el.add(uf.mul(0.75 * g)),
+        el.add(ff.mul(0.75 * g)),
+        0.16 * g,
+        st.skin_dk.scale(0.80),
+        if far { 0.25 } else { 0.5 },
+    );
+
+    if sleeved {
+        let end = sh.lerp(el, 0.46);
+        let sl = Limb::new(sh, end, uf, shape::SLEEVE, g).steps(4);
+        sl.draw(layer, sleeve_col, light);
+        // Hem, and the shadow the sleeve drops on the arm below it.
+        shape::contour(
+            layer,
+            end.add(uf.mul(1.45 * g)),
+            end.sub(uf.mul(1.45 * g)),
+            0.24 * g,
+            sleeve_col.scale(0.66),
+            1.0,
+        );
+        shape::contour(
+            layer,
+            end.add(uf.mul(1.00 * g)),
+            end.sub(uf.mul(1.00 * g)),
+            0.22 * g,
+            skin.scale(0.60),
+            0.45,
+        );
+    }
+
+    // --- hand: a mitt with a thumb, not a ball --------------------------
+    let along = hd.sub(el).norm();
+    let hand = shape::frame(
+        hd,
+        along.mul(g),
+        ff.mul(g),
+        &[
+            (-0.30, 0.74),
+            (0.55, 0.86),
+            (1.15, 0.60),
+            (1.42, 0.10),
+            (1.30, -0.40),
+            (0.55, -0.78),
+            (-0.30, -0.70),
+        ],
+    );
+    shape::cel_poly(layer, &hand, skin, light, 0.42);
+    // Knuckle line, and the wrist.
+    shape::contour(
+        layer,
+        hd.add(along.mul(0.72 * g)).add(ff.mul(0.68 * g)),
+        hd.add(along.mul(1.10 * g)).sub(ff.mul(0.34 * g)),
+        0.13 * g,
+        st.skin_dk.scale(0.78),
+        if far { 0.3 } else { 0.6 },
+    );
+}
+
+fn draw_shield(layer: &mut Layer, d: &Dev, st: &Style, face: Rgb, light: V2) {
+    let g = d.g;
+    let c = d.hand[1];
+    let ex = d.fwd.mul(g);
+    let ey = d.up.mul(-g);
+    // Seen almost edge-on: a narrow oval with a rim and a boss.
+    let disc = shape::frame(
+        c,
+        ex,
+        ey,
+        &[
+            (0.0, -4.6),
+            (2.4, -3.4),
+            (3.1, 0.0),
+            (2.4, 3.4),
+            (0.0, 4.6),
+            (-2.4, 3.4),
+            (-3.1, 0.0),
+            (-2.4, -3.4),
+        ],
+    );
+    shape::cel_poly(layer, &disc, recede(face), light, 0.44);
+    shape::contour(
+        layer,
+        c.add(ey.mul(-4.2)),
+        c.add(ey.mul(4.2)),
+        0.34 * g,
+        recede(face).scale(1.35),
+        0.8,
+    );
+    fill_circle(layer, c, 1.5 * g, recede(st.metal), 1.0);
+    fill_circle(layer, c.sub(ey.mul(0.4)), 0.7 * g, recede(st.metal).scale(1.3), 1.0);
+}
+
+// ---------------------------------------------------------------- torso
+
+fn draw_torso(layer: &mut Layer, d: &Dev, st: &Style, light: V2) {
+    let g = d.g;
+    let (sh, hip) = (d.shoulder, d.hip);
+    let down = hip.sub(sh).norm();
+    let front = shape::front_of(sh, hip, d.facing);
+    let prof = if st.robe > 0.7 {
+        shape::TORSO_ROBE
+    } else if d.heavy {
+        shape::TORSO_HEAVY
+    } else {
+        shape::TORSO
+    };
+    let body = if st.bare_chest { st.skin } else { st.cloth };
+    Limb::new(sh, hip, front, prof, d.chest)
+        .steps(10)
+        .shade(0.46)
+        .draw(layer, body, light);
+
+    // A local frame for the landmarks: +x out through the chest, +y down the
+    // spine, both normalised so the numbers read as fractions of the body.
+    let ex = front.mul(d.chest);
+    let ey = down.mul(d.tl);
+    let at = |x: f32, y: f32| sh.add(ex.mul(x)).add(ey.mul(y));
+
+    if st.bare_chest {
+        // Pectoral: one plate with a hard lower edge, and nothing else. A bare
+        // torso seven pixels wide has room for exactly one landmark — sternum
+        // grooves and abdominals at this size are scratches, not anatomy, and
+        // they cost the chest the broad clean value that makes it read.
+        let pec = shape::frame(
+            sh,
+            ex,
+            ey,
+            &[
+                (-0.16, 0.04),
+                (0.62, 0.06),
+                (0.98, 0.18),
+                (1.00, 0.34),
+                (0.66, 0.44),
+                (-0.10, 0.40),
+                (-0.42, 0.22),
+            ],
+        );
+        shape::cel_poly(layer, &pec, st.skin.scale(1.10), light, 0.30);
+        shape::contour(
+            layer,
+            at(0.96, 0.34),
+            at(-0.06, 0.42),
+            0.28 * g,
+            st.skin_dk.scale(0.62),
+            0.9,
+        );
+        // The crease where the belly folds over the sash.
+        shape::contour(
+            layer,
+            at(0.86, 0.62),
+            at(-0.10, 0.66),
+            0.20 * g,
+            st.skin_dk.scale(0.76),
+            0.42,
+        );
+    } else {
+        // A shoulder seam across the top of the chest, then the V of the collar.
+        shape::contour(
+            layer,
+            at(0.90, 0.02),
+            at(-0.86, 0.04),
+            0.30 * g,
             st.cloth.scale(1.16),
-            0.75,
+            0.8,
         );
-        // V-neck: a wedge of shadowed skin at the collar.
-        let base = f.shoulder.add(f.up.mul(0.2));
-        let pts = [
-            cam.p(base.add(f.fwd.mul(1.25 * g))),
-            cam.p(base.sub(f.fwd.mul(0.7 * g))),
-            cam.p(base.sub(f.up.mul(2.1 * g)).add(f.fwd.mul(0.25 * g))),
-        ];
-        fill_poly(layer, &pts, st.skin_dk.scale(0.9), 0.9);
-        fill_capsule(
+        let collar = shape::frame(
+            sh,
+            ex,
+            ey,
+            &[(1.05, -0.02), (0.98, 0.22), (0.42, 0.10), (-0.55, 0.00), (-0.55, -0.06)],
+        );
+        shape::flat(layer, &collar, st.skin_dk.scale(0.86), 0.9);
+        shape::contour(
             layer,
-            cam.p(base.add(f.fwd.mul(1.35 * g))),
-            cam.p(base.sub(f.fwd.mul(0.85 * g))),
-            cam.l(0.34 * g),
-            cam.l(0.34 * g),
+            at(1.02, 0.20),
+            at(0.30, 0.02),
+            0.20 * g,
             st.cloth_dk,
-            0.85,
+            0.9,
         );
+        // Folds where the garment gathers into the sash.
+        for (x, y) in [(0.72f32, 0.42f32), (0.34, 0.48)] {
+            shape::contour(layer, at(x, y), at(x - 0.2, y + 0.26), 0.18 * g, st.cloth_dk, 0.34);
+        }
     }
 
     // Open waistcoat: covers the back and the sides, leaves the chest bare. In a
     // side view that reads as the garment's front edge running down the body.
     if let Some(v) = st.vest {
-        let sh = f.shoulder.add(f.up.mul(0.4 * g));
-        let hip = f.hip.add(f.up.mul(1.4 * g));
-        let front = f.prop.chest * g * 0.34;
-        let back = f.prop.chest * g * 1.02;
-        let pts = [
-            cam.p(sh.add(f.fwd.mul(front))),
-            cam.p(hip.add(f.fwd.mul(front * 0.7))),
-            cam.p(hip.sub(f.fwd.mul(back * 0.85))),
-            cam.p(sh.sub(f.fwd.mul(back))),
-        ];
-        fill_poly_dir(layer, &pts, v.scale(1.14), v.scale(0.6), light, 1.0);
-        // Front edge and shoulder seam.
-        fill_capsule(
-            layer,
-            cam.p(sh.add(f.fwd.mul(front))),
-            cam.p(hip.add(f.fwd.mul(front * 0.7))),
-            cam.l(0.36 * g),
-            cam.l(0.36 * g),
-            v.scale(1.35),
-            0.9,
+        let coat = shape::frame(
+            sh,
+            ex,
+            ey,
+            &[
+                (0.30, -0.05),
+                (0.36, 0.30),
+                (0.26, 0.72),
+                (-0.74, 0.80),
+                (-1.06, 0.34),
+                (-1.02, -0.04),
+            ],
         );
+        shape::cel_poly(layer, &coat, v, light, 0.46);
+        shape::contour(layer, at(0.32, -0.03), at(0.28, 0.74), 0.24 * g, v.scale(1.35), 0.95);
+        shape::contour(layer, at(0.30, 0.72), at(-0.72, 0.80), 0.22 * g, v.scale(0.62), 0.9);
     }
 }
 
-fn draw_tunic(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, pose: &Pose, light: V2) {
-    let g = f.prop.girth * f.prop.scale;
-    let down = f.up.mul(-1.0);
-    let side = f.fwd;
-    let hem_len = lerp(0.0, 14.6, clampf(st.robe, 0.0, 1.0)) * f.prop.scale;
-    let top = f.hip.add(f.up.mul(f.prop.torso * f.prop.scale * 0.34));
-    let w_top = (f.prop.waist + 0.15) * g;
+fn draw_tunic(layer: &mut Layer, d: &Dev, st: &Style, pose: &Pose, light: V2) {
+    let g = d.g;
+    let down = d.up.mul(-1.0);
+    let side = d.fwd;
+    let hem_len = lerp(0.0, 14.6, clampf(st.robe, 0.0, 1.0)) * d.u;
+    let top = d.hip.add(d.up.mul(d.tl * 0.34));
+    let w_top = d.chest * 0.78;
     let w_bot = lerp(2.6, 5.4, st.robe) * g;
     // The skirt swings against the legs and lifts on the leading side.
     let swing = (pose.leg[0][0] - pose.leg[1][0]) * 0.030;
-    let hem = f.hip.add(down.mul(hem_len));
+    let hem = d.hip.add(down.mul(hem_len));
     let off = side.mul(swing * g);
     let lift = swing.abs() * 0.09 * g;
 
-    // Front to back across the hem, the cloth rising slightly at the edges.
     let hp = |t: f32, drop: f32| -> V2 {
         hem.add(side.mul(lerp(w_bot, -w_bot, t)))
             .add(off)
             .add(down.mul(drop))
     };
     let pts = [
-        cam.p(top.add(side.mul(w_top))),
-        cam.p(f.hip.add(side.mul(w_top * 1.06))),
-        cam.p(hp(0.0, -lift)),
-        cam.p(hp(0.28, 0.45 * g)),
-        cam.p(hp(0.56, -0.15 * g)),
-        cam.p(hp(0.82, 0.36 * g)),
-        cam.p(hp(1.0, -lift * 0.6)),
-        cam.p(f.hip.sub(side.mul(w_top * 1.06))),
-        cam.p(top.sub(side.mul(w_top))),
+        top.add(side.mul(w_top)),
+        d.hip.add(side.mul(w_top * 1.10)),
+        hp(0.0, -lift),
+        hp(0.28, 0.45 * g),
+        hp(0.56, -0.15 * g),
+        hp(0.82, 0.36 * g),
+        hp(1.0, -lift * 0.6),
+        d.hip.sub(side.mul(w_top * 1.10)),
+        top.sub(side.mul(w_top)),
     ];
-    fill_poly_dir(layer, &pts, st.cloth.scale(1.1), st.cloth_dk, light, 1.0);
+    shape::cel_poly(layer, &pts, st.cloth, light, 0.44);
 
-    // Two creases following the drape.
-    for (t, w) in [(0.34f32, 0.75f32), (0.66, 0.55)] {
-        let a = f.hip.add(side.mul(lerp(w_top, -w_top, t) * 0.8));
+    // Three folds following the drape, each a hard-edged wedge rather than a
+    // smear: cloth creases, it does not blur.
+    for (t, w) in [(0.24f32, 0.62f32), (0.50, 0.80), (0.76, 0.55)] {
+        let a = d.hip.add(side.mul(lerp(w_top, -w_top, t) * 0.8));
         let b = hp(t, 0.25 * g);
-        fill_capsule(
-            layer,
-            cam.p(a),
-            cam.p(b),
-            cam.l(w * 0.5 * g),
-            cam.l(w * g),
-            st.cloth_dk,
-            0.40,
-        );
+        let fold = [
+            a.add(side.mul(w * 0.30 * g)),
+            b.add(side.mul(w * 0.75 * g)),
+            b.sub(side.mul(w * 0.35 * g)),
+            a.sub(side.mul(w * 0.20 * g)),
+        ];
+        shape::flat(layer, &fold, st.cloth_dk, 0.34);
     }
     // A darker band along the wavy hem.
     for i in 0..6 {
@@ -891,59 +937,72 @@ fn draw_tunic(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, pose: &Pose,
         let t1 = (i + 1) as f32 / 6.0;
         let d0 = 0.45 * g * (t0 * 3.6).sin().abs();
         let d1 = 0.45 * g * (t1 * 3.6).sin().abs();
-        fill_capsule(
-            layer,
-            cam.p(hp(t0, d0)),
-            cam.p(hp(t1, d1)),
-            cam.l(0.38 * g),
-            cam.l(0.38 * g),
-            st.cloth_dk.scale(0.9),
-            0.7,
-        );
+        shape::contour(layer, hp(t0, d0), hp(t1, d1), 0.36 * g, st.cloth_dk.scale(0.88), 0.8);
     }
 }
 
-fn draw_sash(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, light: V2) {
-    let g = f.prop.girth * f.prop.scale;
-    let waist = f.hip.lerp(f.shoulder, 0.20);
-    let across = f.fwd.mul((f.prop.waist + 0.25) * g);
-    fill_capsule_lit(
+fn draw_sash(layer: &mut Layer, d: &Dev, st: &Style, light: V2) {
+    let g = d.g;
+    let waist = d.hip.lerp(d.shoulder, 0.20);
+    let front = shape::front_of(d.shoulder, d.hip, d.facing);
+    let down = d.hip.sub(d.shoulder).norm();
+    let w = d.chest * 0.95;
+    // Wound twice, so it has a top edge, a bottom edge and a visible overlap.
+    let band = shape::frame(
+        waist,
+        front.mul(w),
+        down.mul(g),
+        &[
+            (0.10, -1.35),
+            (1.08, -1.00),
+            (1.16, 0.80),
+            (0.10, 1.15),
+            (-1.06, 0.85),
+            (-1.10, -1.05),
+        ],
+    );
+    shape::cel_poly(layer, &band, st.sash, light, 0.42);
+    shape::contour(
         layer,
-        cam.p(waist.add(across)),
-        cam.p(waist.sub(across)),
-        cam.l(0.85 * g),
-        cam.l(0.78 * g),
-        st.sash,
-        light,
-        1.0,
+        waist.add(front.mul(w * 1.05)).sub(down.mul(0.05 * g)),
+        waist.sub(front.mul(w * 0.95)).add(down.mul(0.10 * g)),
+        0.14 * g,
+        st.sash_dk,
+        0.75,
     );
     // Knot on the near hip.
-    let knot = waist.add(f.fwd.mul(1.15 * g)).add(f.up.mul(-0.3 * g));
-    fill_ellipse_lit(
-        layer,
-        cam.p(knot),
-        cam.l(0.9 * g),
-        cam.l(0.75 * g),
-        st.sash.scale(1.12),
-        light,
-        1.0,
+    let knot_at = waist.add(front.mul(w * 0.92)).add(down.mul(0.25 * g));
+    let knot = shape::frame(
+        knot_at,
+        front.mul(g),
+        down.mul(g),
+        &[
+            (0.25, -1.00),
+            (1.05, -0.30),
+            (0.90, 0.80),
+            (-0.15, 1.00),
+            (-0.80, 0.25),
+            (-0.50, -0.80),
+        ],
     );
+    shape::cel_poly(layer, &knot, st.sash.scale(1.10), light, 0.38);
+
     if st.belt {
-        let b = waist.add(f.up.mul(-1.5 * g));
-        fill_capsule(
+        let b = waist.add(down.mul(1.5 * g));
+        let across = front.mul(w);
+        shape::contour(
             layer,
-            cam.p(b.add(across)),
-            cam.p(b.sub(across)),
-            cam.l(0.8 * g),
-            cam.l(0.8 * g),
-            st.boot.scale(0.7),
+            b.add(across),
+            b.sub(across),
+            0.78 * g,
+            st.boot.scale(0.70),
             1.0,
         );
         for k in -1..=1 {
             fill_circle(
                 layer,
-                cam.p(b.add(f.fwd.mul(k as f32 * 1.5 * g))),
-                cam.l(0.42 * g),
+                b.add(front.mul(k as f32 * 1.5 * g)),
+                0.40 * g,
                 st.metal.scale(0.85),
                 1.0,
             );
@@ -951,57 +1010,40 @@ fn draw_sash(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, light: V2) {
     }
 }
 
-fn draw_sash_tail(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, pose: &Pose) {
-    let g = f.prop.girth * f.prop.scale;
-    let waist = f.hip.lerp(f.shoulder, 0.20);
-    let back = f.fwd.mul(-1.0);
+fn draw_sash_tail(layer: &mut Layer, d: &Dev, st: &Style, pose: &Pose) {
+    let g = d.g;
+    let waist = d.hip.lerp(d.shoulder, 0.20);
+    let back = d.fwd.mul(-1.0);
     let a = waist.add(back.mul(1.3 * g));
-    let mid = a.add(back.mul(1.5 * g * pose.tail)).add(f.up.mul(-2.4 * g));
+    let mid = a.add(back.mul(1.5 * g * pose.tail)).add(d.up.mul(-2.4 * g));
     let end = mid
         .add(back.mul(1.0 * g * pose.tail))
-        .add(f.up.mul(-2.6 * g - pose.tail * 0.6 * g));
-    fill_capsule(
-        layer,
-        cam.p(a),
-        cam.p(mid),
-        cam.l(0.72 * g),
-        cam.l(0.5 * g),
-        st.sash_dk,
-        1.0,
-    );
-    fill_capsule(
-        layer,
-        cam.p(mid),
-        cam.p(end),
-        cam.l(0.5 * g),
-        cam.l(0.18 * g),
-        st.sash_dk.scale(0.85),
-        1.0,
-    );
+        .add(d.up.mul(-2.6 * g - pose.tail * 0.6 * g));
+    fill_capsule(layer, a, mid, 0.72 * g, 0.50 * g, st.sash_dk, 1.0);
+    fill_capsule(layer, mid, end, 0.50 * g, 0.18 * g, st.sash_dk.scale(0.85), 1.0);
 }
 
 /// A long ribbon streaming back over the shoulder. The shadow prince wears one,
 /// and it is most of what makes him read as an apparition rather than a recolour.
-fn draw_scarf(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, pose: &Pose) {
+fn draw_scarf(layer: &mut Layer, d: &Dev, st: &Style, pose: &Pose) {
     let Some(col) = st.scarf else { return };
     // Distinctly brighter than the body, or it disappears into it.
     let col = col.scale(1.25);
-    let g = f.prop.girth * f.prop.scale;
-    let back = f.fwd.mul(-1.0);
-    let mut p = f.shoulder.add(back.mul(1.2 * g)).add(f.up.mul(0.4 * g));
-    // Four segments, each swinging a little further and waving with the gait.
+    let g = d.g;
+    let back = d.fwd.mul(-1.0);
+    let mut p = d.shoulder.add(back.mul(1.2 * g)).add(d.up.mul(0.4 * g));
     let wave = pose.leg[0][0] * 0.02;
     for k in 0..4 {
         let t = k as f32;
         let q = p
             .add(back.mul((3.0 + t * 0.6) * g))
-            .add(f.up.mul((0.9 + (t * 1.7 + wave).sin() * 2.2) * g));
+            .add(d.up.mul((0.9 + (t * 1.7 + wave).sin() * 2.2) * g));
         fill_capsule(
             layer,
-            cam.p(p),
-            cam.p(q),
-            cam.l((1.5 - t * 0.3) * g),
-            cam.l((1.2 - t * 0.28) * g),
+            p,
+            q,
+            (1.5 - t * 0.3) * g,
+            (1.2 - t * 0.28) * g,
             col.scale(1.0 - t * 0.12),
             1.0,
         );
@@ -1011,549 +1053,397 @@ fn draw_scarf(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, pose: &Pose)
 
 // ---------------------------------------------------------------- head
 
-fn draw_head(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, light: V2) {
-    let g = f.prop.girth * f.prop.scale;
-    let hc = cam.p(f.head);
-    let hr = cam.l(f.head_r);
-    let fw = f.facing;
+fn draw_head(layer: &mut Layer, d: &Dev, st: &Style, light: V2) {
+    let (hc, hr, fw) = (d.head, d.hr, d.facing);
+    // Local frame for every authored head shape: +x forward, +y down, one unit of
+    // each is one head radius.
+    let ex = v2(fw * hr, 0.0);
+    let ey = v2(0.0, hr);
+    let p = |x: f32, y: f32| hc.add(ex.mul(x)).add(ey.mul(y));
 
-    // Neck.
-    fill_capsule_lit(
-        layer,
-        cam.p(f.shoulder.add(f.up.mul(-0.4))),
-        cam.p(f.neck.add(f.up.mul(0.3))),
-        cam.l(1.02 * g),
-        cam.l(0.95 * g),
-        st.skin_dk.lerp(st.skin, 0.45),
-        light,
-        1.0,
-    );
+    // Neck. It runs from inside the jaw down to well below the shoulder line, so
+    // the head sits on the shoulders rather than balancing on a stalk.
+    let nb = d.shoulder.add(d.up.mul(-1.6 * d.g));
+    let nt = hc.add(d.up.mul(-0.35 * hr));
+    Limb::new(nt, nb, shape::front_of(nt, nb, fw), shape::NECK, d.g)
+        .steps(4)
+        .draw(layer, st.skin.scale(0.84), light);
 
-    // Cranium, then the jaw pushed forward and down.
-    fill_ellipse_lit(layer, hc, hr * 1.0, hr * 1.08, st.skin, light, 1.0);
-    fill_ellipse_lit(
-        layer,
-        v2(hc.x + fw * hr * 0.26, hc.y + hr * 0.40),
-        hr * 0.76,
-        hr * 0.60,
-        st.skin,
-        light,
-        1.0,
-    );
+    // The head: forehead, brow, nose, lips, chin, jaw, back of the skull.
+    let head = shape::frame(hc, ex, ey, shape::HEAD);
+    shape::cel_poly(layer, &head, st.skin, light, 0.44);
+
     // Ear, tucked at the back of the jaw.
-    fill_ellipse_lit(
-        layer,
-        v2(hc.x - fw * hr * 0.62, hc.y + hr * 0.14),
-        hr * 0.30,
-        hr * 0.38,
-        st.skin.scale(0.9),
-        light,
-        1.0,
+    let ear = shape::frame(
+        hc,
+        ex,
+        ey,
+        &[(-0.50, 0.02), (-0.28, -0.02), (-0.20, 0.26), (-0.34, 0.46), (-0.56, 0.38)],
     );
+    shape::cel_poly(layer, &ear, st.skin.scale(0.94), light, 0.50);
+    shape::contour(layer, p(-0.40, 0.10), p(-0.32, 0.32), hr * 0.07, st.skin_dk.scale(0.7), 0.7);
 
     match st.head_wrap {
-        None => draw_hair(layer, hc, hr, fw, st, light),
-        Some(wrap) => draw_wrap(layer, hc, hr, fw, st, wrap, light),
+        None => draw_hair(layer, d, st, light),
+        Some(wrap) => draw_wrap(layer, d, st, wrap, light),
     }
     if let Some(band) = st.band {
-        // Tied across the brow, with the knot-ends trailing at the back.
-        let p = |dx: f32, dy: f32| v2(hc.x + fw * hr * dx, hc.y + hr * dy);
-        fill_capsule_lit(
-            layer,
-            p(0.82, -0.44),
-            p(-1.02, -0.56),
-            hr * 0.26,
-            hr * 0.28,
-            band,
-            light,
-            1.0,
+        // Tied across the brow, the knot-ends trailing at the back.
+        let strip = shape::frame(
+            hc,
+            ex,
+            ey,
+            &[(0.88, -0.50), (0.90, -0.22), (-0.10, -0.34), (-1.06, -0.40), (-1.10, -0.66), (-0.10, -0.60)],
         );
-        fill_capsule(
-            layer,
-            p(-0.92, -0.52),
-            p(-1.46, -0.10),
-            hr * 0.20,
-            hr * 0.09,
-            band.scale(0.82),
-            1.0,
+        shape::cel_poly(layer, &strip, band, light, 0.42);
+        let tail = shape::frame(
+            hc,
+            ex,
+            ey,
+            &[(-0.94, -0.62), (-1.52, -0.16), (-1.44, 0.42), (-1.24, 0.30), (-1.30, -0.10), (-0.90, -0.40)],
         );
-        fill_capsule(
-            layer,
-            p(-0.92, -0.44),
-            p(-1.38, 0.30),
-            hr * 0.17,
-            hr * 0.08,
-            band.scale(0.7),
-            1.0,
-        );
+        shape::cel_poly(layer, &tail, band.scale(0.84), light, 0.46);
     }
 
-    // ---- face ---------------------------------------------------------
-    // Brow ridge, casting the eye into shadow.
-    fill_capsule(
-        layer,
-        v2(hc.x + fw * hr * 0.14, hc.y - hr * 0.34),
-        v2(hc.x + fw * hr * 0.86, hc.y - hr * 0.24),
-        hr * 0.17,
-        hr * 0.12,
-        st.skin_dk.scale(0.78),
-        0.9,
+    // ---- face ----------------------------------------------------------
+    // A face is two planes: the front, which catches the light, and the side,
+    // which does not. The edge between them runs from the temple down past the
+    // corner of the mouth to the chin, and drawing that edge is what gives a head
+    // structure at a size where no amount of modelling would survive.
+    let side = shape::frame(
+        hc,
+        ex,
+        ey,
+        &[
+            (0.34, -0.36),
+            (0.54, 0.08),
+            (0.48, 0.56),
+            (0.16, 0.90),
+            (-0.44, 0.72),
+            (-0.86, 0.30),
+            (-0.94, -0.32),
+        ],
     );
+    shape::flat(layer, &side, st.skin_dk.scale(0.96), 0.34);
+
+    // The eye socket: a wedge of shadow under the brow ridge.
+    let socket = shape::frame(
+        hc,
+        ex,
+        ey,
+        &[(0.30, -0.32), (0.82, -0.24), (0.84, 0.02), (0.56, 0.10), (0.32, -0.04)],
+    );
+    shape::flat(layer, &socket, st.skin_dk.scale(0.70), 0.62);
     // Eyebrow, in hair colour: at this scale it does more for the read than any
     // amount of modelling.
-    fill_capsule(
+    shape::contour(layer, p(0.30, -0.38), p(0.80, -0.28), hr * 0.10, st.hair, 0.95);
+    // Eye: small, dark, with one catch of light. A big white sclera at this size
+    // reads as a googly cartoon eye, not as someone looking at something.
+    shape::flat(
         layer,
-        v2(hc.x + fw * hr * 0.26, hc.y - hr * 0.40),
-        v2(hc.x + fw * hr * 0.82, hc.y - hr * 0.32),
-        hr * 0.11,
-        hr * 0.08,
-        st.hair.scale(1.1),
-        0.85,
+        &shape::frame(hc, ex, ey, &[(0.50, -0.08), (0.66, -0.15), (0.80, -0.05), (0.66, 0.05), (0.53, 0.01)]),
+        rgb(228, 220, 206),
+        0.92,
     );
-    // Eye: a dark almond on a pale sclera, kept high-contrast so it still reads
-    // when the whole figure is a dozen pixels tall.
-    let eye = v2(hc.x + fw * hr * 0.56, hc.y);
-    fill_ellipse(layer, eye, hr * 0.30, hr * 0.22, rgb(250, 246, 238), 0.95);
-    fill_ellipse(
+    shape::flat(
         layer,
-        v2(eye.x + fw * hr * 0.07, eye.y + hr * 0.02),
-        hr * 0.17,
-        hr * 0.19,
+        &shape::frame(hc, ex, ey, &[(0.60, -0.12), (0.75, -0.05), (0.72, 0.04), (0.59, 0.00)]),
         st.outline,
         1.0,
     );
-    // Nose: a wedge with a lit bridge.
-    let nose = [
-        v2(hc.x + fw * hr * 0.56, hc.y - hr * 0.02),
-        v2(hc.x + fw * hr * 1.06, hc.y + hr * 0.34),
-        v2(hc.x + fw * hr * 0.58, hc.y + hr * 0.40),
-    ];
-    fill_poly_dir(layer, &nose, st.skin.scale(1.20), st.skin.scale(0.78), light, 1.0);
-    // Mouth, and the shadow under the lip.
-    fill_capsule(
+    // The bridge of the nose catches the light; the underside does not.
+    shape::contour(layer, p(0.84, -0.06), p(1.06, 0.22), hr * 0.11, st.skin.scale(1.24), 0.7);
+    shape::flat(
         layer,
-        v2(hc.x + fw * hr * 0.44, hc.y + hr * 0.64),
-        v2(hc.x + fw * hr * 0.86, hc.y + hr * 0.60),
-        hr * 0.10,
-        hr * 0.08,
-        st.skin_dk.scale(0.55),
-        0.85,
-    );
-    // Cheekbone highlight and the shadow of the jaw.
-    fill_ellipse(
-        layer,
-        v2(hc.x + fw * hr * 0.34, hc.y + hr * 0.14),
-        hr * 0.32,
-        hr * 0.22,
-        st.skin.scale(1.16),
-        0.5,
-    );
-    fill_capsule(
-        layer,
-        v2(hc.x - fw * hr * 0.24, hc.y + hr * 0.80),
-        v2(hc.x + fw * hr * 0.66, hc.y + hr * 0.74),
-        hr * 0.14,
-        hr * 0.11,
-        st.skin_dk.scale(0.7),
-        0.55,
-    );
-}
-
-fn draw_hair(layer: &mut Layer, hc: V2, hr: f32, fw: f32, st: &Style, light: V2) {
-    // A swept cap: low on the brow at the front, sweeping back and down into a
-    // short tail. One polygon, so the silhouette is deliberate.
-    let p = |dx: f32, dy: f32| v2(hc.x + fw * hr * dx, hc.y + hr * dy);
-    let cap = [
-        p(0.66, -0.54),
-        p(0.30, -0.94),
-        p(-0.20, -1.04),
-        p(-0.66, -0.86),
-        p(-0.94, -0.30),
-        p(-1.00, 0.30),
-        p(-0.78, 0.62),
-        p(-1.10, 0.54),
-        p(-1.16, 0.02),
-        p(-1.02, -0.64),
-        p(-0.44, -1.12),
-        p(0.26, -1.02),
-        p(0.76, -0.70),
-    ];
-    fill_poly_dir(layer, &cap, st.hair.scale(1.30), st.hair.scale(0.62), light, 1.0);
-    // Tail at the nape.
-    fill_capsule_lit(
-        layer,
-        p(-0.86, 0.34),
-        p(-1.06, 0.94),
-        hr * 0.30,
-        hr * 0.13,
-        st.hair.scale(1.1),
-        light,
-        1.0,
-    );
-    // A lock falling across the temple.
-    fill_capsule(
-        layer,
-        p(0.18, -0.98),
-        p(0.66, -0.60),
-        hr * 0.18,
-        hr * 0.10,
-        st.hair.scale(1.2),
-        1.0,
-    );
-    // Sheen along the top of the head.
-    fill_capsule(
-        layer,
-        p(-0.38, -0.94),
-        p(0.30, -0.82),
-        hr * 0.15,
-        hr * 0.11,
-        st.hair.lerp(rgb(150, 152, 180), 0.45),
+        &shape::frame(hc, ex, ey, &[(0.78, 0.14), (1.08, 0.30), (0.90, 0.36), (0.78, 0.28)]),
+        st.skin_dk.scale(0.74),
         0.6,
     );
+    fill_circle(layer, p(0.90, 0.31), hr * 0.065, st.skin_dk.scale(0.50), 0.9);
+    // The fold from the nostril to the corner of the mouth, the mouth itself, and
+    // the shadow under the lower lip.
+    shape::contour(layer, p(0.78, 0.36), p(0.70, 0.54), hr * 0.055, st.skin_dk.scale(0.84), 0.30);
+    shape::contour(layer, p(0.64, 0.57), p(0.88, 0.55), hr * 0.07, st.skin_dk.scale(0.44), 0.90);
+    shape::contour(layer, p(0.68, 0.71), p(0.86, 0.69), hr * 0.055, st.skin_dk.scale(0.70), 0.45);
+    // The jaw, and the shadow the head throws down onto the neck.
+    shape::contour(layer, p(-0.34, 0.78), p(0.62, 0.92), hr * 0.13, st.skin_dk.scale(0.60), 0.55);
 }
 
-fn draw_wrap(layer: &mut Layer, hc: V2, hr: f32, fw: f32, st: &Style, wrap: Rgb, light: V2) {
-    let p = |dx: f32, dy: f32| v2(hc.x + fw * hr * dx, hc.y + hr * dy);
-    // Dome.
-    fill_ellipse_lit(
-        layer,
-        v2(hc.x - fw * hr * 0.08, hc.y - hr * 0.66),
-        hr * 1.10,
-        hr * 0.88,
-        wrap,
-        light,
-        1.0,
-    );
-    // Wrapped band across the brow, with a visible overlap at the back.
-    fill_capsule_lit(
-        layer,
-        p(0.98, -0.22),
-        p(-1.04, -0.34),
-        hr * 0.36,
-        hr * 0.40,
-        wrap.scale(0.86),
-        light,
-        1.0,
-    );
-    fill_capsule(
-        layer,
-        p(-0.78, -0.62),
-        p(-1.12, 0.10),
-        hr * 0.26,
-        hr * 0.22,
-        wrap.scale(0.66),
-        0.9,
-    );
-    // A plume means this is a helmet, so give it a nasal bar too.
-    if st.plume.is_some() {
-        fill_capsule(
+fn draw_hair(layer: &mut Layer, d: &Dev, st: &Style, light: V2) {
+    let (hc, hr, fw) = (d.head, d.hr, d.facing);
+    let ex = v2(fw * hr, 0.0);
+    let ey = v2(0.0, hr);
+    // A swept mass: low on the brow at the front, standing proud over the crown,
+    // falling to a short tail at the nape. One authored polygon, so the
+    // silhouette is a decision rather than an accident.
+    let cap = shape::frame(hc, ex, ey, shape::HAIR);
+    shape::cel_poly(layer, &cap, st.hair, light, 0.46);
+    // Locks following the sweep. Without them the mass reads as a helmet.
+    for &((ax, ay), (bx, by), w) in &[
+        ((0.58f32, -0.86f32), (-0.28f32, -1.20f32), 0.13f32),
+        ((0.04, -1.10), (-0.80, -0.96), 0.11),
+        ((-0.68, -0.84), (-1.14, -0.20), 0.10),
+    ] {
+        shape::contour(
             layer,
-            p(0.70, -0.30),
-            p(0.80, 0.46),
-            hr * 0.18,
-            hr * 0.14,
-            st.metal.scale(0.9),
-            1.0,
+            hc.add(ex.mul(ax)).add(ey.mul(ay)),
+            hc.add(ex.mul(bx)).add(ey.mul(by)),
+            hr * w,
+            st.hair.scale(1.34),
+            0.75,
         );
     }
+    // A lock falling across the temple, over the brow.
+    let lock = shape::frame(
+        hc,
+        ex,
+        ey,
+        &[(0.16, -1.02), (0.60, -0.86), (0.96, -0.48), (0.78, -0.40), (0.48, -0.70), (0.12, -0.86)],
+    );
+    shape::cel_poly(layer, &lock, st.hair.scale(1.16), light, 0.50);
+}
+
+fn draw_wrap(layer: &mut Layer, d: &Dev, st: &Style, wrap: Rgb, light: V2) {
+    let (hc, hr, fw) = (d.head, d.hr, d.facing);
+    let ex = v2(fw * hr, 0.0);
+    let ey = v2(0.0, hr);
+    let p = |x: f32, y: f32| hc.add(ex.mul(x)).add(ey.mul(y));
+    // Dome.
+    let dome = shape::frame(
+        hc,
+        ex,
+        ey,
+        &[
+            (0.94, -0.30),
+            (0.86, -0.70),
+            (0.48, -1.16),
+            (-0.10, -1.36),
+            (-0.70, -1.20),
+            (-1.06, -0.78),
+            (-1.18, -0.28),
+            (-1.08, 0.00),
+        ],
+    );
+    shape::cel_poly(layer, &dome, wrap, light, 0.44);
+    // The wrapped band across the brow, with a visible overlap at the back.
+    let band = shape::frame(
+        hc,
+        ex,
+        ey,
+        &[
+            (0.98, -0.34),
+            (0.94, -0.02),
+            (0.10, 0.08),
+            (-0.88, -0.06),
+            (-1.14, -0.40),
+            (-0.92, -0.62),
+            (0.20, -0.58),
+        ],
+    );
+    shape::cel_poly(layer, &band, wrap.scale(0.88), light, 0.42);
+    shape::contour(layer, p(0.90, -0.20), p(-0.90, -0.28), hr * 0.07, wrap.scale(0.58), 0.7);
+    // The end of the cloth, tucked down behind the ear.
+    let tuck = shape::frame(
+        hc,
+        ex,
+        ey,
+        &[(-0.86, -0.62), (-1.20, -0.10), (-1.14, 0.34), (-0.92, 0.24), (-0.96, -0.14), (-0.72, -0.46)],
+    );
+    shape::cel_poly(layer, &tuck, wrap.scale(0.72), light, 0.46);
+
+    // A plume means this is a helmet, so give it a nasal bar too.
     if let Some(pl) = st.plume {
-        fill_capsule_lit(
-            layer,
-            p(-0.10, -1.44),
-            p(-1.30, -2.50),
-            hr * 0.34,
-            hr * 0.10,
-            pl,
-            light,
-            1.0,
+        shape::contour(layer, p(0.72, -0.32), p(0.82, 0.48), hr * 0.16, st.metal.scale(0.9), 1.0);
+        let feather = shape::frame(
+            hc,
+            ex,
+            ey,
+            &[(-0.05, -1.40), (-0.55, -2.10), (-1.35, -2.55), (-1.15, -2.15), (-0.60, -1.70), (-0.35, -1.30)],
         );
+        shape::cel_poly(layer, &feather, pl, light, 0.44);
     }
 }
 
 // ---------------------------------------------------------------- weapons
 
-fn draw_blade(layer: &mut Layer, cam: &Cam, f: &Figure, st: &Style, pose: &Pose, blade: Blade) {
+fn draw_blade(layer: &mut Layer, d: &Dev, st: &Style, pose: &Pose, blade: Blade, light: V2) {
     if blade == Blade::None {
         return;
     }
-    let g = f.prop.girth * f.prop.scale;
-    let light = v2(f.facing * 0.42, -0.91).norm();
+    let g = d.g;
     // Rotate the forearm direction by the pose's blade angle.
-    let base_deg = f.hand_dir.x.atan2(f.hand_dir.y).to_degrees() * f.facing;
-    let d = dir_down(base_deg + pose.sword);
-    let dir = v2(d.x * f.facing, d.y);
+    let base_deg = d.hand_dir.x.atan2(d.hand_dir.y).to_degrees() * d.facing;
+    let dd = dir_down(base_deg + pose.sword);
+    let dir = v2(dd.x * d.facing, dd.y);
     let per = dir.perp();
-    let hand = f.hand[0];
+    let hand = d.hand[0];
     let (len, wide, curve, col) = match blade {
         Blade::Sword => (14.5, 0.78, 0.0, st.metal),
-        Blade::Scimitar => (15.5, 1.05, 0.20, rgb(222, 212, 176)),
+        Blade::Scimitar => (15.5, 1.05, 0.20, rgb(226, 216, 180)),
         Blade::Dagger => (6.4, 0.70, 0.0, st.metal),
         Blade::Wand => (9.0, 1.0, 0.0, rgb(104, 72, 44)),
         Blade::None => return,
     };
-    let len = len * f.prop.scale;
+    let len = len * d.u;
     let grip_a = hand.sub(dir.mul(2.6 * g));
     let tip = hand.add(dir.mul(len)).add(per.mul(curve * len));
     let mid = hand.add(dir.mul(len * 0.5)).add(per.mul(curve * len * 0.34));
 
     // Grip and pommel.
-    fill_capsule_lit(
+    fill_capsule(
         layer,
-        cam.p(grip_a),
-        cam.p(hand.add(dir.mul(0.6 * g))),
-        cam.l(0.72 * g),
-        cam.l(0.76 * g),
+        grip_a,
+        hand.add(dir.mul(0.6 * g)),
+        0.70 * g,
+        0.76 * g,
         rgb(96, 62, 36),
-        light,
         1.0,
     );
-    fill_ellipse_lit(
-        layer,
-        cam.p(grip_a.sub(dir.mul(0.35 * g))),
-        cam.l(0.78 * g),
-        cam.l(0.78 * g),
-        rgb(186, 152, 78),
-        light,
-        1.0,
-    );
+    fill_circle(layer, grip_a.sub(dir.mul(0.35 * g)), 0.80 * g, rgb(186, 152, 78), 1.0);
     if blade == Blade::Wand {
-        fill_capsule_lit(
-            layer,
-            cam.p(hand),
-            cam.p(tip),
-            cam.l(0.8 * g),
-            cam.l(0.65 * g),
-            col,
-            light,
-            1.0,
-        );
-        fill_ellipse_lit(
-            layer,
-            cam.p(tip),
-            cam.l(1.5 * g),
-            cam.l(1.5 * g),
-            rgb(255, 178, 64),
-            light,
-            1.0,
-        );
+        fill_capsule(layer, hand, tip, 0.80 * g, 0.60 * g, col, 1.0);
+        fill_circle(layer, tip, 1.5 * g, rgb(255, 178, 64), 1.0);
         return;
     }
     // Cross-guard with quillons.
     let cg = per.mul(1.75 * g);
-    fill_capsule_lit(
-        layer,
-        cam.p(hand.add(cg).add(dir.mul(0.5 * g))),
-        cam.p(hand.sub(cg).add(dir.mul(0.5 * g))),
-        cam.l(0.42 * g),
-        cam.l(0.42 * g),
-        rgb(190, 154, 78),
-        light,
-        1.0,
-    );
-    // Blade: a tapered diamond, brighter along the fuller.
-    let root = hand.add(dir.mul(1.0 * g));
-    let pts = [
-        cam.p(root.add(per.mul(wide * g))),
-        cam.p(mid.add(per.mul(wide * 0.82 * g))),
-        cam.p(tip),
-        cam.p(mid.sub(per.mul(wide * 0.82 * g))),
-        cam.p(root.sub(per.mul(wide * g))),
-    ];
-    fill_poly_dir(layer, &pts, col.scale(1.2), col.scale(0.55), light, 1.0);
     fill_capsule(
         layer,
-        cam.p(root.add(per.mul(wide * 0.2 * g))),
-        cam.p(mid.lerp(tip, 0.55)),
-        cam.l(0.32 * g),
-        cam.l(0.12 * g),
-        Rgb::WHITE,
-        0.75,
+        hand.add(cg).add(dir.mul(0.5 * g)),
+        hand.sub(cg).add(dir.mul(0.5 * g)),
+        0.42 * g,
+        0.42 * g,
+        rgb(190, 154, 78),
+        1.0,
     );
+    // Blade: a tapered diamond with a bright fuller and a dark back edge — two
+    // hard values, which is what makes steel read as steel.
+    let root = hand.add(dir.mul(1.0 * g));
+    let spine = [
+        root.add(per.mul(wide * g)),
+        mid.add(per.mul(wide * 0.82 * g)),
+        tip,
+        mid.sub(per.mul(wide * 0.82 * g)),
+        root.sub(per.mul(wide * g)),
+    ];
+    shape::flat(layer, &spine, col.scale(0.62), 1.0);
+    let lit = [
+        root.add(per.mul(wide * g)),
+        mid.add(per.mul(wide * 0.82 * g)),
+        tip,
+        mid.add(per.mul(wide * 0.05 * g)),
+        root.add(per.mul(wide * 0.10 * g)),
+    ];
+    shape::flat(layer, &lit, col.scale(1.18), 1.0);
+    shape::contour(layer, root.add(per.mul(wide * 0.45 * g)), mid.lerp(tip, 0.55), 0.24 * g, Rgb::WHITE, 0.7);
+    let _ = light;
 }
 
 // ---------------------------------------------------------------- skeletons
 
-fn draw_bones(
-    layer: &mut Layer,
-    cam: &Cam,
-    f: &Figure,
-    st: &Style,
-    pose: &Pose,
-    blade: Blade,
-    light: V2,
-) {
-    let g = f.prop.girth * f.prop.scale;
+/// A long bone: knobbed at both ends, thin through the shaft. That profile *is*
+/// the read — a capsule of constant width is a stick, not a bone.
+const BONE: shape::Profile = &[
+    (0.00, 1.30, 1.30),
+    (0.14, 0.84, 0.84),
+    (0.50, 0.66, 0.66),
+    (0.86, 0.80, 0.80),
+    (1.00, 1.14, 1.14),
+];
+
+fn draw_bones(layer: &mut Layer, d: &Dev, st: &Style, pose: &Pose, blade: Blade, light: V2) {
+    let g = d.g;
     let bone = rgb(232, 226, 204);
     for &(i, far) in &[(1usize, true), (0usize, false)] {
         let c = if far { recede(bone) } else { bone };
-        // Femur and tibia, thin with knobbed ends.
-        fill_capsule_lit(
-            layer,
-            cam.p(f.hip),
-            cam.p(f.knee[i]),
-            cam.l(1.35 * g),
-            cam.l(1.0 * g),
-            c,
-            light,
-            1.0,
-        );
-        fill_ellipse_lit(layer, cam.p(f.knee[i]), cam.l(1.5 * g), cam.l(1.4 * g), c, light, 1.0);
-        fill_capsule_lit(
-            layer,
-            cam.p(f.knee[i]),
-            cam.p(f.ankle[i]),
-            cam.l(1.05 * g),
-            cam.l(0.8 * g),
-            c,
-            light,
-            1.0,
-        );
-        fill_capsule_lit(
-            layer,
-            cam.p(f.ankle[i]),
-            cam.p(f.toe[i]),
-            cam.l(0.95 * g),
-            cam.l(0.7 * g),
-            c.scale(0.9),
-            light,
-            1.0,
-        );
-        fill_capsule_lit(
-            layer,
-            cam.p(f.shoulder),
-            cam.p(f.elbow[i]),
-            cam.l(1.1 * g),
-            cam.l(0.85 * g),
-            c,
-            light,
-            1.0,
-        );
-        fill_capsule_lit(
-            layer,
-            cam.p(f.elbow[i]),
-            cam.p(f.hand[i]),
-            cam.l(0.85 * g),
-            cam.l(0.7 * g),
-            c,
-            light,
-            1.0,
-        );
+        let seg = |a: V2, b: V2, k: f32| Limb::new(a, b, shape::front_of(a, b, d.facing), BONE, g * k);
+        seg(d.hip, d.knee[i], 1.05).steps(6).draw(layer, c, light);
+        seg(d.knee[i], d.ankle[i], 0.90).steps(6).draw(layer, c, light);
+        seg(d.ankle[i], d.toe[i], 0.80).steps(4).draw(layer, c.scale(0.9), light);
+        seg(d.shoulder, d.elbow[i], 0.90).steps(6).draw(layer, c, light);
+        seg(d.elbow[i], d.hand[i], 0.78).steps(6).draw(layer, c, light);
         // Fingers.
-        let d = f.hand[i].sub(f.elbow[i]).norm();
+        let dir = d.hand[i].sub(d.elbow[i]).norm();
         for k in -1..=1 {
-            let o = d.perp().mul(k as f32 * 0.7 * g);
+            let o = dir.perp().mul(k as f32 * 0.7 * g);
             fill_capsule(
                 layer,
-                cam.p(f.hand[i].add(o)),
-                cam.p(f.hand[i].add(o).add(d.mul(1.5 * g))),
-                cam.l(0.34 * g),
-                cam.l(0.24 * g),
+                d.hand[i].add(o),
+                d.hand[i].add(o).add(dir.mul(1.5 * g)),
+                0.34 * g,
+                0.24 * g,
                 c.scale(0.95),
                 1.0,
             );
         }
     }
     // Spine, pelvis and ribs.
-    fill_capsule_lit(
-        layer,
-        cam.p(f.hip),
-        cam.p(f.shoulder),
-        cam.l(1.15 * g),
-        cam.l(1.0 * g),
-        bone.scale(0.78),
-        light,
-        1.0,
+    let front = shape::front_of(d.shoulder, d.hip, d.facing);
+    Limb::new(d.shoulder, d.hip, front, BONE, g * 1.0)
+        .steps(6)
+        .draw(layer, bone.scale(0.80), light);
+    let ex = front.mul(g);
+    let ey = d.hip.sub(d.shoulder).norm().mul(g);
+    let pelvis = shape::frame(
+        d.hip,
+        ex,
+        ey,
+        &[(2.6, -1.2), (2.9, 0.6), (1.2, 1.9), (-1.2, 1.9), (-2.7, 0.5), (-2.4, -1.2)],
     );
-    fill_ellipse_lit(layer, cam.p(f.hip), cam.l(2.9 * g), cam.l(1.9 * g), bone, light, 1.0);
-    fill_ellipse(
+    shape::cel_poly(layer, &pelvis, bone, light, 0.44);
+    shape::flat(
         layer,
-        cam.p(f.hip),
-        cam.l(1.5 * g),
-        cam.l(0.9 * g),
+        &shape::frame(d.hip, ex, ey, &[(1.3, -0.2), (1.4, 0.9), (-1.3, 0.9), (-1.4, -0.2)]),
         rgb(38, 30, 34),
         0.8,
     );
-    let down = f.up.mul(-1.0);
+    let down = d.up.mul(-1.0);
     for k in 0..4 {
         let t = 0.18 + k as f32 * 0.16;
-        let c = f.shoulder.add(down.mul(f.prop.torso * t * f.prop.scale));
+        let c = d.shoulder.add(down.mul(d.tl * t));
         let w = (2.85 - k as f32 * 0.22) * g;
-        fill_capsule_lit(
+        shape::contour(
             layer,
-            cam.p(c.add(f.fwd.mul(w))),
-            cam.p(c.sub(f.fwd.mul(w * 0.75))),
-            cam.l(0.55 * g),
-            cam.l(0.5 * g),
+            c.add(front.mul(w)),
+            c.sub(front.mul(w * 0.75)),
+            0.52 * g,
             bone,
-            light,
             1.0,
         );
     }
-    // Clavicle.
-    fill_capsule(
+    shape::contour(
         layer,
-        cam.p(f.shoulder.add(f.fwd.mul(2.4 * g))),
-        cam.p(f.shoulder.sub(f.fwd.mul(1.8 * g))),
-        cam.l(0.6 * g),
-        cam.l(0.55 * g),
+        d.shoulder.add(front.mul(2.4 * g)),
+        d.shoulder.sub(front.mul(1.8 * g)),
+        0.58 * g,
         bone.scale(1.05),
         1.0,
     );
 
-    // Skull: cranium, cheekbone, socket, jaw with teeth.
-    let hc = cam.p(f.head);
-    let hr = cam.l(f.head_r);
-    let fw = f.facing;
-    fill_ellipse_lit(layer, hc, hr * 1.04, hr * 1.02, bone, light, 1.0);
-    fill_ellipse_lit(
+    // Skull: cranium, socket, nasal spine, and the dropped jaw with its teeth.
+    let (hc, hr, fw) = (d.head, d.hr, d.facing);
+    let hx = v2(fw * hr, 0.0);
+    let hy = v2(0.0, hr);
+    let p = |x: f32, y: f32| hc.add(hx.mul(x)).add(hy.mul(y));
+    shape::cel_poly(layer, &shape::frame(hc, hx, hy, shape::SKULL), bone, light, 0.44);
+    shape::flat(
         layer,
-        v2(hc.x + fw * hr * 0.46, hc.y + hr * 0.30),
-        hr * 0.62,
-        hr * 0.50,
-        bone.scale(0.95),
-        light,
-        1.0,
-    );
-    fill_ellipse(
-        layer,
-        v2(hc.x + fw * hr * 0.40, hc.y - hr * 0.10),
-        hr * 0.34,
-        hr * 0.30,
+        &shape::frame(hc, hx, hy, &[(0.28, -0.20), (0.74, -0.18), (0.76, 0.16), (0.36, 0.18)]),
         rgb(22, 18, 22),
         1.0,
     );
-    fill_ellipse(
+    shape::flat(
         layer,
-        v2(hc.x + fw * hr * 0.90, hc.y + hr * 0.24),
-        hr * 0.17,
-        hr * 0.22,
+        &shape::frame(hc, hx, hy, &[(0.78, 0.16), (0.94, 0.30), (0.80, 0.40)]),
         rgb(22, 18, 22),
         0.9,
     );
-    fill_capsule_lit(
-        layer,
-        v2(hc.x + fw * hr * 0.10, hc.y + hr * 0.80),
-        v2(hc.x + fw * hr * 0.92, hc.y + hr * 0.66),
-        hr * 0.20,
-        hr * 0.17,
-        bone.scale(0.88),
-        light,
-        1.0,
-    );
+    shape::contour(layer, p(0.20, 0.60), p(0.88, 0.56), hr * 0.09, rgb(30, 24, 26), 0.85);
     for k in 0..4 {
         let t = k as f32 / 3.0;
-        fill_circle(
-            layer,
-            v2(
-                hc.x + fw * hr * lerp(0.20, 0.86, t),
-                hc.y + hr * lerp(0.62, 0.50, t),
-            ),
-            hr * 0.075,
-            rgb(30, 24, 26),
-            0.85,
-        );
+        fill_circle(layer, p(lerp(0.24, 0.84, t), lerp(0.62, 0.54, t)), hr * 0.07, rgb(30, 24, 26), 0.85);
     }
-    draw_blade(layer, cam, f, st, pose, blade);
+    draw_blade(layer, d, st, pose, blade, light);
 }
 
 // ---------------------------------------------------------------- bounds

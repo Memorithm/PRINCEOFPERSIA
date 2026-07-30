@@ -1,24 +1,29 @@
-# Prince of Persia — édition terminal, en Rust
+# Prince of Persia
 
-Une réécriture jouable de *Prince of Persia* qui tourne **dans une fenêtre de
-commande**, écrite en Rust, avec des graphismes rendus en pleine couleur, cinq
-armes (dont quatre bonus qui n'existaient pas dans l'original) et six niveaux
-inédits, tous **plus longs que n'importe quel niveau du jeu de 1989**.
+Une réécriture du *Prince of Persia* de Jordan Mechner (1989) : six niveaux
+inédits, tous plus grands que n'importe quel niveau de l'original, des armes
+bonus, et des personnages dessinés en polygones plutôt qu'en sprites.
 
-![Le jeu tel qu'il s'affiche dans un terminal de 120x32](docs/terminal.png)
+Le jeu existe en deux versions dans ce dépôt :
 
-*Capture fidèle de ce que montre un terminal de 120 × 32 : chaque cellule de
-caractère contient deux pixels indépendants.*
+| | moteur | où | pour quoi |
+|---|---|---|---|
+| **Godot** | Godot 4.3, GDScript | [`godot/`](godot/) | la version jouable : plein écran, lumières dynamiques, son |
+| **terminal** | Rust, sans dépendance hors `crossterm` | [`src/`](src/) | la même partie dans une fenêtre de commande, en demi-blocs 24 bits |
 
-![La même scène en vue rapprochée](docs/terminal-zoom.png)
+Les deux partagent les cartes, la métrique du monde, le répertoire de mouvements
+et le système d'animation ; seule la couche de rendu diffère.
 
-*La même scène, `+` enfoncé. Une salle entière dans 120 colonnes ne laisse au
-prince que quatre pixels de large ; la vue rapprochée lui en donne douze, et le
-dessin devient lisible. Voir [Une salle entière ou de près](#une-salle-entière-ou-de-près).*
+## Lancer la version Godot
 
----
+```sh
+godot --path godot
+```
 
-## Sommaire
+Voir [`godot/README.md`](godot/README.md) pour les commandes, l'architecture et
+le test d'intégration.
+
+## Version terminal — sommaire
 
 - [Lancer le jeu](#lancer-le-jeu)
 - [Commandes](#commandes)
