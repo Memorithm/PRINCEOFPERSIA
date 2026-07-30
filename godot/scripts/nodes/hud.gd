@@ -125,7 +125,9 @@ func _draw_play(vp: Vector2) -> void:
 	if world.msg_t > 0.0:
 		var a := clampf(world.msg_t, 0.0, 1.0)
 		var col := Color(0.98, 0.62, 0.5, a) if world.msg_warn else Color(0.94, 0.90, 0.80, a)
-		_txt(world.msg_text, Vector2(vp.x * 0.5, top - vp.y * 0.03), int(s * 1.05), col, true)
+		# Les messages vont en haut : au-dessus de la barre, ils se posaient en
+		# travers du personnage, qui est exactement ce qu'on regarde en les lisant.
+		_txt(world.msg_text, Vector2(vp.x * 0.5, vp.y * 0.085), int(s * 1.05), col, true)
 
 func _flask(c: Vector2, r: float, full: bool) -> void:
 	var glass := Color(0.72, 0.76, 0.80, 0.75)

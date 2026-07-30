@@ -258,7 +258,10 @@ func _update_camera() -> void:
 	var z := vp.x / room_w
 	cam.zoom = Vector2(z, z)
 	world.set_view_size(vp.x / z, vp.y / z)
-	cam.position = world.camera_centre()
+	# On décale la caméra vers le bas de la moitié de la barre d'interface : le
+	# monde remonte d'autant à l'écran, et les pieds du prince ne finissent jamais
+	# derrière le sablier.
+	cam.position = world.camera_centre() + Vector2(0.0, vp.y * 0.078 / z)
 
 func _update_grade(dt: float) -> void:
 	var m: ShaderMaterial = grade.material
