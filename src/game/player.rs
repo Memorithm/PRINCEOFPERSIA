@@ -1077,7 +1077,7 @@ impl Game {
         let pl = &self.player;
         let mut best: Option<(usize, f32)> = None;
         for (i, g) in self.guards.iter().enumerate() {
-            if g.st == GState::Dead {
+            if g.st == GState::Dead || !g.hostile() {
                 continue;
             }
             if (g.p.y - pl.p.y).abs() > TILE_H * 0.6 {
@@ -1102,7 +1102,7 @@ impl Game {
         crate::game::render::mark_slash(self, tip, pl.facing);
         let mut hit: Option<usize> = None;
         for (i, g) in self.guards.iter().enumerate() {
-            if g.st == GState::Dead {
+            if g.st == GState::Dead || !g.hostile() {
                 continue;
             }
             if (g.p.y - pl.p.y).abs() > TILE_H * 0.6 {

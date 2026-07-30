@@ -150,7 +150,7 @@ impl Game {
             }
             if s.friendly {
                 for (gi, g) in self.guards.iter().enumerate() {
-                    if g.st == crate::game::GState::Dead {
+                    if g.st == crate::game::GState::Dead || !g.hostile() {
                         continue;
                     }
                     if (g.p.x - s.p.x).abs() < 11.0 && (g.p.y - 15.0 - s.p.y).abs() < 17.0 {
@@ -225,7 +225,7 @@ impl Game {
             g.p.y
         };
         let g = &mut self.guards[gi];
-        if g.st == crate::game::GState::Dead {
+        if g.st == crate::game::GState::Dead || !g.kind.hostile() {
             return;
         }
         g.hp -= dmg;

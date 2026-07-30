@@ -24,6 +24,7 @@ dessin devient lisible. Voir [Une salle entière ou de près](#une-salle-entièr
 - [Commandes](#commandes)
 - [Une salle entière ou de près](#une-salle-entière-ou-de-près)
 - [Fluidité](#fluidité)
+- [Le casting](#le-casting)
 - [Les armes](#les-armes)
 - [Les six niveaux](#les-six-niveaux)
 - [Comment les graphismes fonctionnent](#comment-les-graphismes-fonctionnent)
@@ -132,6 +133,31 @@ saute. Sur un terminal large (200 colonnes et plus) la vue x1 suffit déjà.
 - **Rattrapage de corniche.** Sortir d'un bord en courant puis presser `Maj`
   attrape le rebord qu'on vient de quitter, en se retournant pour lui faire face.
 
+## Le casting
+
+Les costumes suivent une planche de personnages fournie en référence : le prince
+est **torse nu**, large écharpe rouge à la taille, **pantalon bouffant** resserré
+dans les bottes, bandeau au front — pas la tunique blanche de la version Apple II.
+Les gardes portent **turban et gilet ouvert sur bras nus**, pantalon large et
+bottes enroulées.
+
+| | Personnage | Signes distinctifs |
+|---|---|---|
+| ![garde](docs/guard.png) | **Le prince** et **un garde** | Lui : torse nu, écharpe et bandeau rouges, pantalon sarouel bleu-vert. Le garde : turban orange, gilet de cuir, ceinture cloutée, pantalon olive, cimeterre. |
+| ![vizir](docs/palace.png) | **Le Vizir** | Robe crème, cheveux blonds, pas de turban. Adresse 8 : il pare presque tout et frappe vite. Il attend sous les jardins suspendus. |
+| ![squelette](docs/skeleton.png) | **Le squelette** | Cage thoracique, bassin, mâchoire dentée. |
+| ![jaffar](docs/jaffar.png) | **Jaffar** | Robe pourpre jusqu'au sol, turban sombre à plumet rouge, cimeterre. |
+| ![princesse](docs/princess.png) | **La princesse** | Coiffe bleue, corsage rouge, pantalon blanc, chaussons rouges. Elle attend près de la dernière porte et ne se bat pas. |
+
+L'Ombre du niveau 6 n'est plus une simple recoloration du prince : magenta, coiffe
+violette, et **un long ruban qui flotte derrière elle** — c'est le ruban qui la
+fait lire comme une apparition.
+
+Ces costumes sont *redessinés*, pas décalqués : le moteur n'a pas de feuilles de
+sprites à copier, il n'a que des squelettes et des primitives. La planche a servi
+de référence de silhouette, de palette et de garde-robe, comme n'importe quelle
+référence de dessin.
+
 ## Les armes
 
 L'épée est celle de l'original ; les quatre autres sont des ajouts. Tout ce que
@@ -143,7 +169,7 @@ vous ramassez vous suit d'un niveau au suivant.
 | **Dagues de jet** (`T`) | niveau 1, citerne sous les geôles | Projectile, 1 dégât, 5 par ramassage, 12 au maximum. Aucune parade possible contre elles. |
 | **Bouclier** (passif) | niveau 2, chambre inondée | Pare tout seul 40 % des bottes reçues de face, et dévie complètement les projectiles. |
 | **Bâton de flamme** (`F`) | niveau 4, laboratoire de l'alchimiste | Boule de feu, 2 dégâts, éclaire la pièce en vol. 8 charges. |
-| **Cimeterre du Vizir** (`Tab`) | niveau 5, sous les jardins | 2 dégâts, portée 29 px, 35 % de chance de traverser une parade — mais la botte est 22 % plus lente. |
+| **Cimeterre du Vizir** (`Tab`) | niveau 5, sous les jardins | 2 dégâts, portée 29 px, 35 % de chance de traverser une parade — mais la botte est 22 % plus lente. Son propriétaire n'est pas loin. |
 
 Les fioles : `♥` soin, élixir de vigueur (+1 cœur définitif), potion de plume
 (annule les dégâts de chute), potion de célérité (+35 % de vitesse), et du poison
@@ -162,8 +188,8 @@ Un niveau de l'original comptait au maximum 24 salles de 10 × 3 dalles. Ici :
 | 2 | Les Citernes | 9 × 5 = **45** | 27 | citerne | lames à cadence, bouclier, herse minutée |
 | 3 | L'Escalier du Palais | 10 × 5 = **50** | 30 | palais | geôlier au cimeterre, élixir de vigueur |
 | 4 | La Tour de l'Alchimiste | 9 × 6 = **54** | 29 | tour | bâton de flamme, squelette |
-| 5 | Les Jardins Suspendus | 11 × 5 = **55** | 29 | jardins | cimeterre du Vizir, longue traversée |
-| 6 | Le Sanctuaire de Jaffar | 10 × 6 = **60** | 27 | sanctuaire | miroir, l'Ombre, Jaffar |
+| 5 | Les Jardins Suspendus | 11 × 5 = **55** | 29 | jardins | cimeterre et duel contre le Vizir |
+| 6 | Le Sanctuaire de Jaffar | 10 × 6 = **60** | 27 | sanctuaire | miroir, l'Ombre, Jaffar, la princesse |
 
 **166 salles jouables** au total. Chaque niveau est vérifié automatiquement :
 un test parcourt la carte avec un modèle volontairement pessimiste des capacités
@@ -171,8 +197,6 @@ du prince et échoue si la sortie ou le moindre objet est inatteignable
 (voir [Tests](#tests)).
 
 ![Une herse dans les geôles](docs/dungeon.png)
-![L'escalier du palais](docs/palace.png)
-![Jaffar](docs/jaffar.png)
 
 ## Comment les graphismes fonctionnent
 
@@ -199,6 +223,13 @@ course, le saut, l'escalade, la suspension, la boisson, trois gardes d'escrime e
 cinq morphologies (prince, garde, geôlier obèse, squelette, Jaffar en robe) qui
 se ressemblent toutes.
 
+**Une garde-robe, pas des recolorations.** Le style d'un personnage décrit sa mise
+plutôt que ses pixels : torse nu ou vêtu, gilet ouvert, longueur du vêtement du
+bas (rien / tunique / robe), ampleur du pantalon (ajusté jusqu'à sarouel resserré
+à la cheville), turban ou bandeau, ruban flottant, ceinture cloutée, plumet.
+Sept personnages en sortent — prince, garde, geôlier, squelette, Ombre, Vizir,
+Jaffar, princesse — sans une seule image stockée.
+
 **Éclairage de forme.** Une capsule remplie d'une seule couleur se lit comme une
 pastille plate. Chaque membre est donc ombré *en travers* de son axe, comme un
 cylindre éclairé d'une direction fixe ; chaque tête est ombrée comme une sphère ;
@@ -220,7 +251,7 @@ chargée — dessiner directement sur le canevas mettrait des contours *entre* l
 membres. Les membres du côté opposé sont en plus assombris, désaturés et refroidis,
 de sorte que les membres proches avancent sans qu'il faille un trait entre eux.
 
-![Un squelette dans la tour de l'alchimiste](docs/skeleton.png)
+
 
 **Éclairage en une passe.** La scène est d'abord peinte à pleine luminosité,
 puis multipliée par un champ lumineux échantillonné bilinéairement (torches avec

@@ -665,7 +665,7 @@ impl App {
         self.screen.text_attr(
             x + 2,
             y + 3,
-            "Jaffar est tombé. Le palais respire de nouveau.",
+            "Jaffar est tombé. La princesse t'attendait derrière la porte.",
             TEXT,
             PANEL_BG,
             0,

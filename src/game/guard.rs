@@ -68,7 +68,9 @@ impl Guard {
             MobKind::Fat => 5,
             MobKind::Skeleton => 4,
             MobKind::Shadow => 4,
+            MobKind::Vizier => 7,
             MobKind::Jaffar => 9,
+            MobKind::Princess => 1,
         };
         Guard {
             kind: m.kind,
@@ -112,8 +114,8 @@ impl Guard {
 
     pub fn melee(&self) -> Melee {
         match self.kind {
-            MobKind::Fat => Melee::Scimitar,
-            MobKind::Jaffar => Melee::Scimitar,
+            MobKind::Fat | MobKind::Vizier | MobKind::Jaffar => Melee::Scimitar,
+            MobKind::Princess => Melee::None,
             _ => Melee::Sword,
         }
     }
@@ -124,65 +126,120 @@ impl Guard {
             MobKind::Fat => Prop::PRINCE.scaled(0.98, 1.55),
             MobKind::Skeleton => Prop::PRINCE.scaled(1.0, 0.74),
             MobKind::Shadow => Prop::PRINCE.scaled(1.0, 1.0),
+            MobKind::Vizier => Prop::PRINCE.scaled(1.04, 1.06),
             MobKind::Jaffar => Prop::PRINCE.scaled(1.06, 1.14),
+            MobKind::Princess => Prop::PRINCE.scaled(0.97, 0.92),
         }
     }
 
     pub fn style(&self) -> Style {
         let base = Style::PRINCE;
         match self.kind {
+            // A turban, an open waistcoat over bare arms, loose olive trousers
+            // and wrapped boots.
             MobKind::Guard => Style {
-                skin: rgb(196, 146, 104),
-                skin_dk: rgb(140, 96, 64),
-                cloth: rgb(132, 62, 54),
-                cloth_dk: rgb(80, 34, 32),
-                sash: rgb(64, 58, 70),
-                sash_dk: rgb(38, 34, 44),
-                hair: rgb(28, 22, 22),
-                boot: rgb(92, 60, 36),
-                head_wrap: Some(rgb(148, 152, 168)),
-                plume: Some(rgb(178, 46, 46)),
+                skin: rgb(198, 146, 100),
+                skin_dk: rgb(132, 88, 56),
+                sash: rgb(120, 44, 40),
+                sash_dk: rgb(72, 24, 24),
+                hair: rgb(32, 24, 22),
+                boot: rgb(146, 116, 76),
+                trouser: rgb(130, 120, 56),
+                baggy: 0.9,
+                head_wrap: Some(rgb(190, 88, 40)),
+                vest: Some(rgb(112, 70, 42)),
                 belt: true,
+                band: None,
                 ..base
             },
+            // The jailer: broader, a pale turban, a heavier scimitar.
             MobKind::Fat => Style {
-                skin: rgb(202, 156, 116),
-                skin_dk: rgb(146, 100, 70),
-                cloth: rgb(112, 92, 62),
-                cloth_dk: rgb(66, 54, 38),
-                sash: rgb(150, 42, 40),
-                sash_dk: rgb(92, 24, 26),
+                skin: rgb(206, 158, 114),
+                skin_dk: rgb(140, 94, 62),
+                sash: rgb(158, 44, 40),
+                sash_dk: rgb(94, 24, 26),
+                boot: rgb(118, 84, 50),
+                trouser: rgb(150, 132, 92),
+                baggy: 0.95,
                 head_wrap: Some(rgb(214, 206, 186)),
+                vest: Some(rgb(96, 76, 52)),
                 belt: true,
+                band: None,
                 ..base
             },
             MobKind::Skeleton => Style {
                 bones: true,
                 head_wrap: None,
+                band: None,
                 ..base
             },
+            // Magenta, weightless, with a long ribbon streaming behind: the
+            // apparition, not a recolour of the prince.
             MobKind::Shadow => Style {
-                skin: rgb(70, 68, 104),
-                skin_dk: rgb(42, 40, 70),
-                cloth: rgb(58, 60, 96),
-                cloth_dk: rgb(30, 32, 58),
-                sash: rgb(88, 52, 110),
-                sash_dk: rgb(48, 26, 64),
-                hair: rgb(20, 18, 34),
-                boot: rgb(38, 34, 52),
-                outline: rgb(12, 10, 24),
+                skin: rgb(196, 128, 178),
+                skin_dk: rgb(112, 60, 108),
+                sash: rgb(228, 150, 196),
+                sash_dk: rgb(150, 74, 126),
+                hair: rgb(52, 26, 62),
+                boot: rgb(94, 58, 104),
+                trouser: rgb(224, 206, 232),
+                baggy: 0.85,
+                head_wrap: Some(rgb(96, 44, 108)),
+                scarf: Some(rgb(232, 128, 176)),
+                band: None,
+                outline: rgb(28, 12, 34),
+                ..base
+            },
+            // The vizier: a cream robe, fair hair, no turban.
+            MobKind::Vizier => Style {
+                skin: rgb(214, 168, 128),
+                skin_dk: rgb(148, 102, 70),
+                cloth: rgb(232, 224, 200),
+                cloth_dk: rgb(158, 146, 120),
+                sash: rgb(178, 156, 96),
+                sash_dk: rgb(110, 94, 52),
+                hair: rgb(196, 158, 84),
+                boot: rgb(122, 96, 62),
+                trouser: rgb(214, 206, 184),
+                baggy: 0.5,
+                bare_chest: false,
+                robe: 1.0,
+                head_wrap: None,
+                band: None,
                 ..base
             },
             MobKind::Jaffar => Style {
                 skin: rgb(186, 138, 100),
                 skin_dk: rgb(128, 86, 58),
-                cloth: rgb(58, 44, 92),
+                cloth: rgb(64, 46, 104),
                 cloth_dk: rgb(30, 22, 54),
                 sash: rgb(212, 172, 76),
                 sash_dk: rgb(140, 106, 34),
+                trouser: rgb(52, 38, 84),
+                baggy: 0.4,
+                bare_chest: false,
                 head_wrap: Some(rgb(34, 26, 58)),
                 plume: Some(rgb(206, 58, 58)),
                 robe: 1.0,
+                band: None,
+                ..base
+            },
+            // Blue headdress, red bodice, white trousers, red shoes.
+            MobKind::Princess => Style {
+                skin: rgb(238, 194, 154),
+                skin_dk: rgb(168, 114, 82),
+                cloth: rgb(198, 46, 62),
+                cloth_dk: rgb(122, 24, 38),
+                sash: rgb(226, 206, 132),
+                sash_dk: rgb(154, 132, 70),
+                hair: rgb(38, 28, 34),
+                boot: rgb(198, 40, 56),
+                trouser: rgb(240, 238, 232),
+                baggy: 0.75,
+                bare_chest: false,
+                robe: 0.34,
+                head_wrap: Some(rgb(72, 118, 196)),
+                band: None,
                 ..base
             },
         }
@@ -202,6 +259,11 @@ impl Guard {
             GState::Dead => (&a.dead, 1.0),
             GState::Falling => (&a.fall, 1.0),
         }
+    }
+
+    /// Will it draw on the prince?
+    pub fn hostile(&self) -> bool {
+        self.kind.hostile()
     }
 
     pub fn pose(&self) -> Pose {
@@ -243,7 +305,9 @@ impl Guard {
         match self.kind {
             MobKind::Fat => 26.0,
             MobKind::Jaffar => 46.0,
+            MobKind::Vizier => 48.0,
             MobKind::Skeleton => 40.0,
+            MobKind::Princess => 18.0,
             _ => 34.0,
         }
     }
@@ -333,7 +397,8 @@ impl Game {
             let dx = pl.p.x - g.p.x;
             let dist = dx.abs();
             let same_room = Level::room_of(tx, ty) == Level::room_of(pl.foot_tile().0, pl.foot_tile().1);
-            let engaged = player_alive && same_row && same_room && dist < TILE_W * 3.4;
+            let engaged =
+                g.hostile() && player_alive && same_row && same_room && dist < TILE_W * 3.4;
             if engaged {
                 g.alert = (g.alert + dt).min(3.0);
             } else {
@@ -461,7 +526,10 @@ impl Game {
     }
 
     fn kind_patrols(&self, k: MobKind) -> bool {
-        !matches!(k, MobKind::Jaffar | MobKind::Shadow)
+        !matches!(
+            k,
+            MobKind::Jaffar | MobKind::Shadow | MobKind::Vizier | MobKind::Princess
+        )
     }
 
     fn merge_shadow(&mut self, i: usize) {
@@ -520,7 +588,7 @@ impl Game {
             if g.st == GState::Dead {
                 continue;
             }
-            if matches!(g.kind, MobKind::Jaffar) {
+            if matches!(g.kind, MobKind::Jaffar | MobKind::Vizier) {
                 return Some((
                     g.kind.name(),
                     clampf(g.hp as f32 / g.hp_max as f32, 0.0, 1.0),

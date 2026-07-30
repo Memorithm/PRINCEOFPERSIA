@@ -20,7 +20,8 @@
 //!   @ start
 //!   h heal  H vigour  f feather  x poison  q celerity
 //!   s sword D daggers F flame wand C buckler M scimitar
-//!   g guard z jailer  k skeleton S shadow    J Jaffar
+//!   g guard z jailer  k skeleton S shadow    Y vizier   J Jaffar
+//!   P princess (not an enemy — she waits by the last door)
 //! ```
 //!
 //! Link layer: a digit or letter wires plates to the gates and doors that share
@@ -451,7 +452,7 @@ const L5_ROWS: &[&[&str]] = &[
         "=====^^===",
         "==g=======",
         "==.====G==",
-        F,
+        "===Y======",
         W,
         W,
     ],
@@ -496,7 +497,7 @@ const L5_LINKS: &[&[&str]] = &[
     &[S, S, S, S, S, S, "....4.....", S, "..6.......", S, S],
     &[S, S, S, S, S, S, S, S, S, S, S],
     &[S, S, S, S, S, S, S, S, S, S, S],
-    &[S, S, S, S, "....4.....", S, "..5.......", ".......A..", S, S, S],
+    &[S, S, S, S, "....4.....", S, "..5.......", ".......A..", "...8......", S, S],
     &[S, S, S, S, S, S, S, S, S, S, S],
     &[S, S, S, S, S, S, S, S, S, S, S],
     &[S, S, S, "....5.....", S, S, S, "......A...", S, S, S],
@@ -512,7 +513,7 @@ const L5_LINKS: &[&[&str]] = &[
 const L6_ROWS: &[&[&str]] = &[
     &[W, W, W, W, W, W, W, W, W, W],
     &[W, W, W, W, W, W, W, W, "....t.....", "..t......."],
-    &[W, W, W, W, W, W, W, W, "==J===p===", "=======X##"],
+    &[W, W, W, W, W, W, W, W, "==J===p===", "=====P=X##"],
     &[W, W, W, W, W, W, W, W, UPR_A, W],
     &[W, W, W, W, W, W, W, W, UPR_B, W],
     &[

@@ -235,7 +235,11 @@ pub enum MobKind {
     Fat,
     Skeleton,
     Shadow,
+    /// The vizier: a robed duellist, faster and far better with a blade.
+    Vizier,
     Jaffar,
+    /// Not an enemy. She waits at the end of the last level.
+    Princess,
 }
 
 impl MobKind {
@@ -245,8 +249,15 @@ impl MobKind {
             MobKind::Fat => "Geôlier",
             MobKind::Skeleton => "Squelette",
             MobKind::Shadow => "L'Ombre",
+            MobKind::Vizier => "Le Vizir",
             MobKind::Jaffar => "Jaffar",
+            MobKind::Princess => "La Princesse",
         }
+    }
+
+    /// Will it fight? The shadow will if provoked; the princess never.
+    pub fn hostile(self) -> bool {
+        self != MobKind::Princess
     }
 }
 
