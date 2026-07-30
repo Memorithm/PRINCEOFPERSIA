@@ -138,6 +138,10 @@ pub struct Game {
     pub view_h: f32,
     /// Sword-stroke flourishes waiting to be drawn: (position, facing, age).
     pub slashes: Vec<(V2, f32, f32)>,
+    /// Magnification. 1.0 frames exactly one room, the way the original did;
+    /// above that the camera follows the prince and he is drawn correspondingly
+    /// larger, which is the only way a character reads on a narrow terminal.
+    pub zoom: f32,
 }
 
 impl Game {
@@ -188,6 +192,7 @@ impl Game {
             view_w: ROOM_W,
             view_h: ROOM_H,
             slashes: Vec::new(),
+            zoom: 1.0,
             dy,
             idx,
             lv,
@@ -296,7 +301,7 @@ impl Game {
     // ------------------------------------------------------------ update
 
     pub fn update(&mut self, dt: f32, input: &crate::input::Input) {
-        let dt = dt.min(1.0 / 20.0);
+        let dt = dt.min(1.0 / 15.0);
         self.elapsed += dt;
         if self.phase == Phase::Play {
             self.clock -= dt;
@@ -539,18 +544,30 @@ impl Game {
 
     fn update_camera(&mut self, dt: f32) {
         let (tx, ty) = self.player.foot_tile();
-        let room = Level::room_of(tx, ty);
-        if room != self.cam.room {
-            self.cam.room = room;
-        }
-        let r = self.room_rect(self.cam.room);
-        // Centre the (possibly larger) view on the room.
-        let tgt = v2(
-            r.0 + (ROOM_W - self.view_w) * 0.5,
-            r.1 + (ROOM_H - self.view_h) * 0.5,
-        );
+        self.cam.room = Level::room_of(tx, ty);
+        let tgt = if self.zoom <= 1.001 {
+            // Authentic: frame the room the prince is standing in.
+            let r = self.room_rect(self.cam.room);
+            v2(
+                r.0 + (ROOM_W - self.view_w) * 0.5,
+                r.1 + (ROOM_H - self.view_h) * 0.5,
+            )
+        } else {
+            // Magnified: follow him, but never look outside the level.
+            let mut c = v2(
+                self.player.p.x - self.view_w * 0.5,
+                self.player.p.y - 13.0 - self.view_h * 0.5,
+            );
+            let maxx = (self.lv.tw as f32 * TILE_W - self.view_w).max(0.0);
+            let maxy = (self.lv.th as f32 * TILE_H - self.view_h).max(0.0);
+            c.x = clampf(c.x, 0.0, maxx);
+            c.y = clampf(c.y, 0.0, maxy);
+            c
+        };
         self.cam.target = tgt;
-        let k = clampf(dt * 11.0, 0.0, 1.0);
+        // Exponential smoothing, written so the result does not depend on the
+        // simulation step.
+        let k = 1.0 - (-dt * 13.0).exp();
         self.cam.at = self.cam.at.lerp(self.cam.target, k);
     }
 }
@@ -559,7 +576,14 @@ impl Game {
 /// from `Game::new` so the simulation does not depend on terminal geometry.
 impl Game {
     pub fn set_view_size(&mut self, w: f32, h: f32) {
-        self.view_w = w.max(ROOM_W);
-        self.view_h = h.max(ROOM_H);
+        self.view_w = w.max(TILE_W * 3.0);
+        self.view_h = h.max(TILE_H * 1.2);
+    }
+
+    /// Snap the camera to wherever it should be right now, with no easing —
+    /// used when the level starts or the magnification changes.
+    pub fn centre_camera(&mut self) {
+        self.update_camera(1000.0);
+        self.cam.at = self.cam.target;
     }
 }

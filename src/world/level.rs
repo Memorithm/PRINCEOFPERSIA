@@ -252,6 +252,14 @@ impl Level {
                         tile = Tile::Floor;
                         mob = Some(MobKind::Jaffar);
                     }
+                    'Y' => {
+                        tile = Tile::Floor;
+                        mob = Some(MobKind::Vizier);
+                    }
+                    'P' => {
+                        tile = Tile::Floor;
+                        mob = Some(MobKind::Princess);
+                    }
                     other => {
                         return Err(ParseError(format!(
                             "{}: unknown map char {:?} at ({}, {})",

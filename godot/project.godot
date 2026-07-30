@@ -1,0 +1,53 @@
+; Prince of Persia — moteur Godot 4
+;
+; Les actions d'entrée sont déclarées à l'exécution (scripts/nodes/main.gd) plutôt
+; qu'ici : le format sérialisé des InputEvent est fragile à éditer à la main, et
+; une table construite en GDScript se relit.
+
+config_version=5
+
+[application]
+
+config/name="Prince of Persia"
+config/description="Une réécriture du Prince of Persia de Jordan Mechner : six niveaux inédits, armes bonus, personnages dessinés en polygones."
+run/main_scene="res://scenes/Main.tscn"
+config/features=PackedStringArray("4.3", "Forward Plus")
+config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/size/window_width_override=1280
+window/size/window_height_override=720
+
+[rendering]
+
+anti_aliasing/quality/msaa_2d=2
+textures/canvas_textures/default_texture_filter=1
+environment/defaults/default_clear_color=Color(0.03, 0.03, 0.05, 1)
+2d/snap/snap_2d_transforms_to_pixel=false
+2d/snap/snap_2d_vertices_to_pixel=false
+
+[physics]
+
+common/physics_ticks_per_second=120
+
+[debug]
+
+; Godot 4.3 traite « inférence depuis un Variant » comme une erreur fatale.
+; Le jeu s'appuie sur des tableaux et des dictionnaires hétérogènes (poses,
+; couches de niveau, particules) où c'est un avertissement légitime, pas un
+; défaut : on le ramène au rang d'avertissement.
+gdscript/warnings/inference_on_variant=1
+gdscript/warnings/untyped_declaration=0
+gdscript/warnings/unsafe_method_access=0
+gdscript/warnings/unsafe_property_access=0
+gdscript/warnings/unsafe_call_argument=0
+gdscript/warnings/unused_parameter=0
+gdscript/warnings/shadowed_variable=0
+gdscript/warnings/shadowed_variable_base_class=0
+gdscript/warnings/integer_division=0
+gdscript/warnings/return_value_discarded=0

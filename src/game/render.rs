@@ -86,9 +86,9 @@ impl Game {
             if g.p.y < -1000.0 {
                 continue;
             }
-            let alpha = if g.kind == MobKind::Shadow { 0.82 } else { 1.0 };
+            let alpha = if g.kind == MobKind::Shadow { 0.86 } else { 1.0 };
             if g.kind == MobKind::Shadow {
-                items::draw_shadow_aura(cv, &cam, v2(g.p.x, g.p.y - 16.0), cam.l(22.0));
+                items::draw_shadow_aura(cv, &cam, v2(g.p.x, g.p.y - 16.0), cam.l(24.0));
             }
             self.draw_figure_at(
                 cv,
@@ -98,7 +98,7 @@ impl Game {
                 &g.style(),
                 &g.pose(),
                 v2(g.p.x, g.p.y),
-                g.facing,
+                g.facing_vis,
                 g.blade(),
                 alpha,
             );
@@ -123,11 +123,11 @@ impl Game {
             cv,
             layer,
             &cam,
-            &Prop::PRINCE.scaled(0.88, 1.0),
+            &Prop::PRINCE,
             &pstyle,
             &pl.pose(),
             v2(pl.p.x, pl.p.y),
-            pl.facing,
+            pl.facing_vis,
             pl.blade(),
             flicker,
         );
@@ -255,7 +255,8 @@ impl Game {
             Rgb::BLACK,
             0.42 * alpha,
         );
-        let (x0, y0, x1, y1) = skel::figure_bbox(cam, &fig, 22.0);
+        let pad = if style.scarf.is_some() { 34.0 } else { 22.0 };
+        let (x0, y0, x1, y1) = skel::figure_bbox(cam, &fig, pad);
         // Clip the scratch layer to the canvas so huge off-screen figures are cheap.
         let x0 = x0.max(-4);
         let y0 = y0.max(-4);

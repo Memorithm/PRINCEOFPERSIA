@@ -6,6 +6,7 @@
 //! parry — with the bonus weapons layered on top.
 
 use crate::art::anim::{anims, Clip};
+use crate::art::skel::Pose;
 use crate::game::combat::{Melee, ShotKind};
 use crate::game::*;
 use crate::gfx::color::rgb;
@@ -115,7 +116,32 @@ pub struct Player {
     /// Cooldown between thrown weapons.
     pub throw_cd: f32,
     pub cause: Option<&'static str>,
+
+    // ---- presentation and feel ------------------------------------------
+    /// Pose held at the moment the state changed, cross-faded out of so that no
+    /// transition ever snaps.
+    pub blend_from: Pose,
+    pub blend_t: f32,
+    /// Eased facing. The sign mirrors the figure and the magnitude compresses it,
+    /// so a turn passes through an edge-on pose instead of flipping.
+    pub facing_vis: f32,
+    /// Run-cycle phase, advanced by *distance travelled* rather than by time, so
+    /// the feet never skate however fast he happens to be moving.
+    pub gait: f32,
+    /// Buffered button presses, so an action pressed during a locked animation
+    /// still happens the moment the animation lets go.
+    pub buf_jump: f32,
+    pub buf_attack: f32,
 }
+
+/// How long a pose cross-fade takes.
+pub const BLEND: f32 = 0.085;
+/// Distance covered by one full six-key run cycle.
+pub const STRIDE_PX: f32 = 36.0;
+/// Duration of that cycle in the clip.
+pub const RUN_CYCLE: f32 = 0.45;
+/// How long a button press stays queued.
+pub const BUFFER: f32 = 0.18;
 
 impl Player {
     pub fn new(at: V2, facing: f32, carry: &Carry) -> Player {
@@ -151,6 +177,12 @@ impl Player {
             step_to: at.x,
             throw_cd: 0.0,
             cause: None,
+            blend_from: Pose::REST,
+            blend_t: BLEND,
+            facing_vis: facing,
+            gait: 0.0,
+            buf_jump: 0.0,
+            buf_attack: 0.0,
         }
     }
 
@@ -208,14 +240,35 @@ impl Player {
         }
     }
 
-    /// Sample the pose for the current moment.
-    pub fn pose(&self) -> crate::art::skel::Pose {
+    /// Where in its clip the current state is. Cycles are driven by distance
+    /// travelled; everything else by time in state.
+    fn clip_time(&self) -> f32 {
+        match self.st {
+            PState::Run => self.gait,
+            _ => self.t,
+        }
+    }
+
+    /// The clip's own pose, before cross-fading.
+    fn raw_pose(&self) -> Pose {
         let (clip, rate) = self.clip();
         if rate < 0.0 {
             let total = clip.total();
-            clip.sample((total - self.t * -rate).max(0.0))
+            clip.sample((total - self.clip_time() * -rate).max(0.0))
         } else {
-            clip.sample(self.t * rate)
+            clip.sample(self.clip_time() * rate)
+        }
+    }
+
+    /// Sample the pose for the current moment, cross-faded out of the pose the
+    /// previous state ended on.
+    pub fn pose(&self) -> Pose {
+        let p = self.raw_pose();
+        if self.blend_t >= BLEND {
+            p
+        } else {
+            self.blend_from
+                .lerp(&p, crate::util::smoothstep(self.blend_t / BLEND))
         }
     }
 
@@ -239,9 +292,14 @@ impl Game {
         if self.player.st == st {
             return;
         }
-        self.player.st = st;
-        self.player.t = 0.0;
-        self.player.struck = false;
+        // Freeze the pose we are leaving and fade out of it.
+        let from = self.player.pose();
+        let pl = &mut self.player;
+        pl.blend_from = from;
+        pl.blend_t = 0.0;
+        pl.st = st;
+        pl.t = 0.0;
+        pl.struck = false;
     }
 
     /// Slide `x` horizontally, stopping against masonry and closed gates.
@@ -285,31 +343,38 @@ impl Game {
     }
 
     /// A ledge to grab while airborne.
-    fn grab_target(&self, pl: &Player) -> Option<(i32, i32)> {
+    ///
+    /// The ledge ahead is tried first, then the one *behind* — that second case
+    /// is the original's signature save: run off a brink with the grab key held
+    /// and catch the lip you just left, turning to face it as you do.
+    fn grab_target(&self, pl: &Player) -> Option<(i32, i32, bool)> {
         if pl.p.y < 0.0 {
             return None;
         }
         let br = Level::ty_of_feet(pl.p.y);
         let ly = br - 1;
-        let front = Level::tx_of(pl.p.x + pl.facing * (BODY_HW + 4.0));
-        if !self.supported(front, ly) {
-            return None;
-        }
-        // The body has to fit in the cell below the ledge.
-        if !self.open(front, br) {
-            return None;
-        }
         let hang_y = Level::surf(ly) + HANG_DROP;
         if (pl.p.y - hang_y).abs() > 15.0 {
             return None;
         }
-        Some((front, ly))
+        for (dir, turn) in [(pl.facing, false), (-pl.facing, true)] {
+            let lx = Level::tx_of(pl.p.x + dir * (BODY_HW + 4.0));
+            // Something to grip, and room for the body to hang below it.
+            if self.supported(lx, ly) && self.open(lx, br) {
+                return Some((lx, ly, turn));
+            }
+        }
+        None
     }
 
-    fn start_hang(&mut self, ledge: (i32, i32)) {
-        let (lx, ly) = ledge;
+    fn start_hang(&mut self, ledge: (i32, i32, bool)) {
+        let (lx, ly, turn) = ledge;
         let mut pl = self.player;
-        pl.ledge = ledge;
+        if turn {
+            // You end up facing the lip you caught.
+            pl.facing = -pl.facing;
+        }
+        pl.ledge = (lx, ly);
         pl.p.y = Level::surf(ly) + HANG_DROP;
         // Hands on the lip: line the body up with the edge of the ledge tile.
         pl.p.x = if pl.facing > 0.0 {
@@ -321,8 +386,8 @@ impl Game {
         pl.fall_from = pl.p.y;
         self.player = pl;
         self.enter(PState::Hang);
-        let at = v2(self.player.p.x, self.player.p.y - 28.0);
-        self.fx.dust(at, 3, 0.5, self.lv.theme.slab_face);
+        let at = v2(self.player.p.x, self.player.p.y - HANG_DROP + 2.0);
+        self.fx.dust(at, 4, 0.6, self.lv.theme.slab_face);
     }
 
     fn begin_fall(&mut self) {
@@ -415,10 +480,21 @@ impl Game {
     pub fn update_player(&mut self, dt: f32, inp: &Input) {
         let mut pl = self.player;
         pl.t += dt;
+        pl.blend_t += dt;
         pl.invuln = (pl.invuln - dt).max(0.0);
         pl.float_t = (pl.float_t - dt).max(0.0);
         pl.swift_t = (pl.swift_t - dt).max(0.0);
         pl.throw_cd = (pl.throw_cd - dt).max(0.0);
+        pl.buf_jump = (pl.buf_jump - dt).max(0.0);
+        pl.buf_attack = (pl.buf_attack - dt).max(0.0);
+        if inp.up_edge {
+            pl.buf_jump = BUFFER;
+        }
+        if inp.attack {
+            pl.buf_attack = BUFFER;
+        }
+        // Ease the visible facing so turning is a movement, not a mirror flip.
+        pl.facing_vis = crate::util::approach(pl.facing_vis, pl.facing, dt / 0.075);
         self.player = pl;
 
         // ---- ranged weapons work from almost any footing -----------------
@@ -466,7 +542,8 @@ impl Game {
                 } else if inp.sheathe && self.player.armed {
                     self.player.armed = false;
                     self.enter(PState::Stand);
-                } else if inp.attack {
+                } else if inp.attack || self.player.buf_attack > 0.0 {
+                    self.player.buf_attack = 0.0;
                     if self.player.armed {
                         self.enter(PState::Strike);
                     } else if self.player.melee != Melee::None {
@@ -478,7 +555,8 @@ impl Game {
                     }
                 } else if inp.parry && self.player.armed {
                     self.enter(PState::Parry);
-                } else if inp.up {
+                } else if inp.up || self.player.buf_jump > 0.0 {
+                    self.player.buf_jump = 0.0;
                     match self.climb_target(&self.player) {
                         Some(l) => self.begin_climb(l),
                         None => {
@@ -567,7 +645,10 @@ impl Game {
             PState::RunStop => {
                 let f = 1.0 - (self.player.t / clip_total).min(1.0);
                 self.step_run(dt, self.player.speed() * f * 0.8);
-                if done {
+                // A jump queued mid-skid fires as soon as the feet are under him,
+                // rather than being swallowed.
+                let early = self.player.buf_jump > 0.0 && self.player.t > clip_total * 0.45;
+                if done || early {
                     self.enter(PState::Stand);
                 }
             }
@@ -610,7 +691,9 @@ impl Game {
                 self.airborne_step(dt, inp);
             }
             PState::Land => {
-                if done {
+                let early = (self.player.buf_jump > 0.0 || inp.any_dir())
+                    && self.player.t > clip_total * 0.5;
+                if done || early {
                     self.enter(PState::Stand);
                 }
             }
@@ -830,11 +913,16 @@ impl Game {
         self.enter(PState::ClimbDown);
     }
 
-    /// Horizontal running motion plus the "walk off the edge" check.
+    /// Horizontal running motion plus the "walk off the edge" check. The run
+    /// cycle is advanced by how far he actually moved, which is what stops the
+    /// feet skating when he accelerates or drinks a potion of celerity.
     fn step_run(&mut self, dt: f32, sp: f32) {
         let y = self.player.p.y;
         let dx = self.player.facing * sp * dt;
-        self.player.p.x = self.slide_x(self.player.p.x, y, dx);
+        let x0 = self.player.p.x;
+        self.player.p.x = self.slide_x(x0, y, dx);
+        let moved = (self.player.p.x - x0).abs();
+        self.player.gait += moved / STRIDE_PX * RUN_CYCLE;
         let (tx, ty) = self.player.foot_tile();
         if !self.supported(tx, ty) {
             self.begin_fall();
@@ -989,7 +1077,7 @@ impl Game {
         let pl = &self.player;
         let mut best: Option<(usize, f32)> = None;
         for (i, g) in self.guards.iter().enumerate() {
-            if g.st == GState::Dead {
+            if g.st == GState::Dead || !g.hostile() {
                 continue;
             }
             if (g.p.y - pl.p.y).abs() > TILE_H * 0.6 {
@@ -1014,7 +1102,7 @@ impl Game {
         crate::game::render::mark_slash(self, tip, pl.facing);
         let mut hit: Option<usize> = None;
         for (i, g) in self.guards.iter().enumerate() {
-            if g.st == GState::Dead {
+            if g.st == GState::Dead || !g.hostile() {
                 continue;
             }
             if (g.p.y - pl.p.y).abs() > TILE_H * 0.6 {

@@ -19,7 +19,18 @@ use crate::input::{Cmd, Input, Reader};
 use crate::world::levels::{self, CAMPAIGN};
 use crate::world::tile::{ROOM_H, ROOM_W};
 
-const FRAME: Duration = Duration::from_micros(33_333); // ~30 fps
+/// Render pacing, chosen from the terminal's size by [`App::frame_budget`]. The
+/// simulation is decoupled from it and always advances in [`SIM_DT`] steps, so
+/// physics is identical whatever the frame rate turns out to be.
+const FRAME_60: Duration = Duration::from_micros(16_667);
+/// Fixed simulation step: 120 Hz. Small enough that a running jump's arc and a
+/// chomper's snap are the same every time, and that motion is smooth even when
+/// the terminal cannot keep up with the draw.
+const SIM_DT: f32 = 1.0 / 120.0;
+/// Never try to catch up more than this much simulation in one frame.
+const MAX_CATCHUP: f32 = 0.25;
+/// Magnification steps: 1.0 frames a whole room, higher follows the prince.
+const ZOOMS: [f32; 5] = [1.0, 1.4, 1.8, 2.3, 3.0];
 const MIN_COLS: i32 = 56;
 const MIN_ROWS: i32 = 14;
 
@@ -54,6 +65,14 @@ pub struct App {
     menu_sel: usize,
     total_time: f32,
     seed: u64,
+    /// Index into [`ZOOMS`].
+    zoom_ix: usize,
+    /// Left-over simulation time from the previous frame.
+    acc: f32,
+    /// On-screen height of a character, in terminal pixels.
+    figure_px: f32,
+    /// Minimum wall-clock time between rendered frames.
+    frame: Duration,
 }
 
 impl App {
@@ -75,6 +94,10 @@ impl App {
             menu_sel: level,
             total_time: 0.0,
             seed,
+            zoom_ix: 0,
+            acc: 0.0,
+            figure_px: 32.0,
+            frame: FRAME_60,
         })
     }
 
@@ -95,14 +118,52 @@ impl App {
         } else {
             (ROOM_W, ROOM_W / aspect)
         };
+        // Never magnify so far that less than five tiles of the room are visible:
+        // past that you cannot see what you are about to jump onto.
+        let max_zoom = (vw / (crate::world::tile::TILE_W * 5.0)).max(1.0);
+        let zoom = ZOOMS[self.zoom_ix.min(ZOOMS.len() - 1)].min(max_zoom);
+        self.game.zoom = zoom;
+        let (vw, vh) = (vw / zoom, vh / zoom);
         self.game.set_view_size(vw, vh);
         let mut ss = (pw as f32 / vw * 1.4).clamp(2.0, 3.5);
         while vw * ss * vh * ss > 430_000.0 && ss > 1.0 {
             ss -= 0.25;
         }
         self.ss = ss;
+        // How tall the prince ends up on screen, in terminal pixels. Below about
+        // 16 the artwork stops being legible and the player should know the
+        // magnification keys exist.
+        self.figure_px = 27.0 * pw as f32 / vw;
+        self.frame = self.frame_budget();
         self.canvas
             .resize((vw * ss).round() as i32, (vh * ss).round() as i32);
+    }
+
+    /// How often to redraw. Every rendered frame costs escape codes roughly in
+    /// proportion to the cell count, so a very large terminal is drawn less often
+    /// rather than saturating the connection — motion stays correct either way,
+    /// because the simulation runs at a fixed 120 Hz regardless.
+    fn frame_budget(&self) -> Duration {
+        let cells = self.screen.cols as i64 * self.screen.rows as i64;
+        let fps = if cells <= 5_000 {
+            60
+        } else if cells <= 12_000 {
+            45
+        } else {
+            30
+        };
+        Duration::from_micros(1_000_000 / fps)
+    }
+
+    /// Nudge the player towards `+` when the figures are too small to read.
+    fn hint_zoom(&mut self) {
+        if self.figure_px < 16.0 && self.zoom_ix == 0 {
+            let hint = format!(
+                "{}  —  appuie sur + pour rapprocher la vue",
+                self.game.lv.hint
+            );
+            self.game.say(&hint, 7.0, false);
+        }
     }
 
     // ---------------------------------------------------------------- loop
@@ -135,22 +196,37 @@ impl App {
             let now = Instant::now();
             let dt = (now - last).as_secs_f32().min(0.1);
             last = now;
+            // Advance the simulation in fixed steps. Edge-triggered inputs are
+            // handed to the first step only, so one key press is one action
+            // however many steps this frame turns out to need.
+            self.acc = (self.acc + dt).min(MAX_CATCHUP);
+            let live = self.state == State::Play;
+            let mut first = if live { inp } else { Input::default() };
+            let mut rest = first;
+            rest.attack = false;
+            rest.throw = false;
+            rest.cast = false;
+            rest.sheathe = false;
+            rest.up_edge = false;
+            rest.down_edge = false;
+            rest.left_edge = false;
+            rest.right_edge = false;
+            if live {
+                self.total_time += dt;
+            }
+            while self.acc >= SIM_DT {
+                self.game.update(SIM_DT, &first);
+                first = rest;
+                self.acc -= SIM_DT;
+            }
             match self.state {
-                State::Play => {
-                    self.total_time += dt;
-                    self.game.update(dt, &inp);
-                    self.check_phase();
-                }
+                State::Play => self.check_phase(),
                 State::Title | State::Help => {
-                    // Keep the scene alive behind the menu.
-                    self.game.update(dt, &Input::default());
                     if self.game.phase != Phase::Play {
                         self.game.phase = Phase::Play;
                     }
                 }
-                _ => {
-                    self.game.update(dt, &Input::default());
-                }
+                _ => {}
             }
 
             // ---- draw -----------------------------------------------------
@@ -158,8 +234,8 @@ impl App {
             self.screen.flush(&mut out)?;
 
             let spent = Instant::now() - now;
-            if spent < FRAME {
-                std::thread::sleep(FRAME - spent);
+            if spent < self.frame {
+                std::thread::sleep(self.frame - spent);
             }
         }
         Ok(())
@@ -201,6 +277,8 @@ impl App {
                     self.game.restart();
                 }
                 (State::Play, Cmd::NextWeapon) => self.cycle_weapon(),
+                (_, Cmd::ZoomIn) => self.set_zoom(self.zoom_ix + 1),
+                (_, Cmd::ZoomOut) => self.set_zoom(self.zoom_ix.saturating_sub(1)),
                 (State::Paused, Cmd::Pause) | (State::Paused, Cmd::Confirm) => {
                     self.state = State::Play
                 }
@@ -228,6 +306,23 @@ impl App {
         }
     }
 
+    fn set_zoom(&mut self, ix: usize) {
+        let ix = ix.min(ZOOMS.len() - 1);
+        if ix == self.zoom_ix {
+            return;
+        }
+        self.zoom_ix = ix;
+        self.layout();
+        self.game.centre_camera();
+        let z = ZOOMS[ix];
+        let msg = if z <= 1.001 {
+            "Vue : une salle entière".to_string()
+        } else {
+            format!("Vue rapprochée x{z:.1}")
+        };
+        self.game.say(&msg, 1.6, false);
+    }
+
     fn cycle_weapon(&mut self) {
         let pl = &mut self.game.player;
         let has_both = pl.sword && pl.scimitar;
@@ -247,6 +342,7 @@ impl App {
         if let Ok(g) = Game::new(self.menu_sel, Carry::default(), seed) {
             self.game = g;
             self.layout();
+            self.game.centre_camera();
         }
     }
 
@@ -255,6 +351,8 @@ impl App {
         if let Ok(g) = Game::new(idx, Carry::default(), seed) {
             self.game = g;
             self.layout();
+            self.game.centre_camera();
+            self.hint_zoom();
             self.state = State::Play;
             self.total_time = 0.0;
         }
@@ -275,6 +373,8 @@ impl App {
             g.kills = kills;
             self.game = g;
             self.layout();
+            self.game.centre_camera();
+            self.hint_zoom();
             self.menu_sel = idx;
             self.state = State::Play;
         }
@@ -417,7 +517,7 @@ impl App {
         self.screen.text_attr(
             x + 2,
             r,
-            "↑↓ choisir    Entrée jouer    F1 commandes    Q quitter",
+            "↑↓ choisir   Entrée jouer   +/- vue   F1 commandes   Q quitter",
             DIMTEXT,
             PANEL_BG,
             A_DIM,
@@ -565,7 +665,7 @@ impl App {
         self.screen.text_attr(
             x + 2,
             y + 3,
-            "Jaffar est tombé. Le palais respire de nouveau.",
+            "Jaffar est tombé. La princesse t'attendait derrière la porte.",
             TEXT,
             PANEL_BG,
             0,
@@ -584,7 +684,7 @@ impl App {
 
 // ---------------------------------------------------------------- entry point
 
-pub fn play(level: usize, seed: u64) -> io::Result<()> {
+pub fn play(level: usize, seed: u64, view: f32) -> io::Result<()> {
     let mut out = io::stdout();
     terminal::enable_raw_mode()?;
     execute!(out, terminal::EnterAlternateScreen, cursor::Hide)?;
@@ -609,6 +709,14 @@ pub fn play(level: usize, seed: u64) -> io::Result<()> {
     let result = (|| -> io::Result<()> {
         let mut app = App::new(level, seed)?;
         app.reader.enhanced = enhanced;
+        // Pick the nearest magnification step to what was asked for.
+        let mut best = 0usize;
+        for (i, z) in ZOOMS.iter().enumerate() {
+            if (z - view).abs() < (ZOOMS[best] - view).abs() {
+                best = i;
+            }
+        }
+        app.zoom_ix = best;
         app.run()
     })();
 

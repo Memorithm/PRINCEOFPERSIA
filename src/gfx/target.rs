@@ -207,6 +207,132 @@ pub fn stroke_line<T: Target>(t: &mut T, p: V2, q: V2, width: f32, col: Rgb, a: 
     fill_capsule(t, p, q, width * 0.5, width * 0.5, col, a);
 }
 
+// ------------------------------------------------------------------ form lighting
+//
+// A capsule filled with one colour reads as a flat lozenge. Shading it *across*
+// its axis — as if it were a cylinder lit from a fixed direction — is what makes
+// an arm look like an arm. These are the primitives the characters are built
+// from; every limb, every head, every fold of cloth goes through one of them.
+
+/// Ambient term: how bright a surface facing the viewer is.
+const FORM_AMBIENT: f32 = 0.80;
+/// How much the light direction swings the shading either side of ambient.
+const FORM_DIFFUSE: f32 = 0.44;
+/// Extra light on surfaces facing straight at the viewer, so limbs do not go
+/// flat in the middle.
+const FORM_FACING: f32 = 0.15;
+/// A bright edge where the surface turns away on the lit side.
+const FORM_RIM: f32 = 0.26;
+
+#[inline]
+fn form_shade(n: f32, nz: f32, towards_light: f32) -> f32 {
+    let k = n * towards_light;
+    let mut lit = FORM_AMBIENT + FORM_DIFFUSE * k + FORM_FACING * nz;
+    if k > 0.70 {
+        lit += FORM_RIM * (k - 0.70) / 0.30;
+    }
+    clampf(lit, 0.34, 1.55)
+}
+
+/// Capsule shaded as a cylinder lit from `light` (a screen-space unit vector).
+#[allow(clippy::too_many_arguments)]
+pub fn fill_capsule_lit<T: Target>(
+    t: &mut T,
+    p: V2,
+    q: V2,
+    ra: f32,
+    rb: f32,
+    base: Rgb,
+    light: V2,
+    alpha: f32,
+) {
+    let rmax = ra.max(rb);
+    if rmax <= 0.0 || alpha <= 0.001 {
+        return;
+    }
+    let axis = q.sub(p);
+    let len = axis.len();
+    let perp = if len > 1e-4 {
+        axis.mul(1.0 / len).perp()
+    } else {
+        v2(1.0, 0.0)
+    };
+    // How much the "outward" side of the cylinder faces the light.
+    let pl = perp.x * light.x + perp.y * light.y;
+
+    let (bx0, by0, bx1, by1) = t.bounds();
+    let x0 = ((p.x.min(q.x) - rmax - 1.0).floor() as i32).max(bx0);
+    let x1 = ((p.x.max(q.x) + rmax + 1.0).ceil() as i32).min(bx1);
+    let y0 = ((p.y.min(q.y) - rmax - 1.0).floor() as i32).max(by0);
+    let y1 = ((p.y.max(q.y) + rmax + 1.0).ceil() as i32).min(by1);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let pt = v2(x as f32 + 0.5, y as f32 + 0.5);
+            let tt = proj_seg(pt, p, q);
+            let r = ra + (rb - ra) * tt;
+            if r <= 0.0 {
+                continue;
+            }
+            let closest = p.add(axis.mul(tt));
+            let off = pt.sub(closest);
+            let d = off.len();
+            let cov = clampf(0.5 - (d - r), 0.0, 1.0);
+            if cov <= 0.0 {
+                continue;
+            }
+            // Signed, normalised distance from the axis: -1 on one flank, +1 on
+            // the other, 0 along the centre line.
+            let side = off.x * perp.x + off.y * perp.y;
+            let n = clampf(if side < 0.0 { -d } else { d } / r, -1.0, 1.0);
+            let nz = (1.0 - n * n).max(0.0).sqrt();
+            t.blend(x, y, base.scale(form_shade(n, nz, pl)), alpha * cov);
+        }
+    }
+}
+
+/// Ellipse shaded as a sphere — heads, shoulder caps, pommels.
+pub fn fill_ellipse_lit<T: Target>(
+    t: &mut T,
+    c: V2,
+    rx: f32,
+    ry: f32,
+    base: Rgb,
+    light: V2,
+    alpha: f32,
+) {
+    if rx <= 0.0 || ry <= 0.0 || alpha <= 0.001 {
+        return;
+    }
+    let (bx0, by0, bx1, by1) = t.bounds();
+    let x0 = ((c.x - rx - 1.0).floor() as i32).max(bx0);
+    let x1 = ((c.x + rx + 1.0).ceil() as i32).min(bx1);
+    let y0 = ((c.y - ry - 1.0).floor() as i32).max(by0);
+    let y1 = ((c.y + ry + 1.0).ceil() as i32).min(by1);
+    let s = rx.min(ry);
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let nx = (x as f32 + 0.5 - c.x) / rx;
+            let ny = (y as f32 + 0.5 - c.y) / ry;
+            let m = (nx * nx + ny * ny).sqrt();
+            let cov = clampf(0.5 - (m - 1.0) * s, 0.0, 1.0);
+            if cov <= 0.0 {
+                continue;
+            }
+            let nz = (1.0 - m * m).max(0.0).sqrt();
+            // Project the surface normal onto the light; `m` doubles as the
+            // magnitude of the in-plane part of the normal.
+            let k = if m > 1e-4 {
+                (nx * light.x + ny * light.y) / m
+            } else {
+                0.0
+            };
+            t.blend(x, y, base.scale(form_shade(m.min(1.0) * k, nz, 1.0)), alpha * cov);
+        }
+    }
+}
+
+// ------------------------------------------------------------------ polygons
+
 // ------------------------------------------------------------------ polygons
 
 const SUBROWS: i32 = 4;
@@ -214,11 +340,56 @@ const SUBROWS: i32 = 4;
 /// Even-odd fill of a simple polygon with 4x vertical sub-sampling and
 /// analytic horizontal coverage.
 pub fn fill_poly<T: Target>(t: &mut T, pts: &[V2], col: Rgb, alpha: f32) {
-    fill_poly_shaded(t, pts, col, col, alpha);
+    fill_poly_with(t, pts, alpha, |_, _| col);
 }
 
-/// Same, but shaded top-to-bottom across the polygon's bounding box.
+/// Shaded top-to-bottom across the polygon's bounding box.
 pub fn fill_poly_shaded<T: Target>(t: &mut T, pts: &[V2], top: Rgb, bot: Rgb, alpha: f32) {
+    let mut ymin = f32::MAX;
+    let mut ymax = f32::MIN;
+    for p in pts {
+        ymin = ymin.min(p.y);
+        ymax = ymax.max(p.y);
+    }
+    let inv = 1.0 / (ymax - ymin).max(0.001);
+    fill_poly_with(t, pts, alpha, move |_, y| {
+        top.lerp(bot, clampf((y - ymin) * inv, 0.0, 1.0))
+    });
+}
+
+/// Linear gradient along an arbitrary direction — cloth lit from one side.
+/// `col_lit` is used where the polygon faces `dir`, `col_dark` at the far end.
+pub fn fill_poly_dir<T: Target>(
+    t: &mut T,
+    pts: &[V2],
+    col_lit: Rgb,
+    col_dark: Rgb,
+    dir: V2,
+    alpha: f32,
+) {
+    let mut lo = f32::MAX;
+    let mut hi = f32::MIN;
+    for p in pts {
+        let d = p.x * dir.x + p.y * dir.y;
+        lo = lo.min(d);
+        hi = hi.max(d);
+    }
+    let inv = 1.0 / (hi - lo).max(0.001);
+    fill_poly_with(t, pts, alpha, move |x, y| {
+        let d = (x * dir.x + y * dir.y - lo) * inv;
+        // `dir` points towards the light, so the far end (d = 0) is the dark one.
+        col_dark.lerp(col_lit, clampf(d, 0.0, 1.0))
+    });
+}
+
+/// The scanline rasteriser every polygon fill is built on. `col` is asked for the
+/// colour at each covered pixel centre.
+pub fn fill_poly_with<T: Target, F: FnMut(f32, f32) -> Rgb>(
+    t: &mut T,
+    pts: &[V2],
+    alpha: f32,
+    mut col: F,
+) {
     if pts.len() < 3 || alpha <= 0.001 {
         return;
     }
@@ -243,7 +414,6 @@ pub fn fill_poly_shaded<T: Target>(t: &mut T, pts: &[V2], top: Rgb, bot: Rgb, al
     let span = (ix1 - ix0) as usize;
     let mut cov = vec![0f32; span];
     let mut xs: Vec<f32> = Vec::with_capacity(8);
-    let inv_h = 1.0 / (ymax - ymin).max(0.001);
     let wsub = 1.0 / SUBROWS as f32;
 
     for y in iy0..iy1 {
@@ -279,10 +449,11 @@ pub fn fill_poly_shaded<T: Target>(t: &mut T, pts: &[V2], top: Rgb, bot: Rgb, al
         if !any {
             continue;
         }
-        let c = top.lerp(bot, clampf((y as f32 + 0.5 - ymin) * inv_h, 0.0, 1.0));
         for (i, &v) in cov.iter().enumerate() {
             if v > 0.002 {
-                t.blend(ix0 + i as i32, y, c, alpha * v.min(1.0));
+                let x = ix0 + i as i32;
+                let c = col(x as f32 + 0.5, y as f32 + 0.5);
+                t.blend(x, y, c, alpha * v.min(1.0));
             }
         }
     }
