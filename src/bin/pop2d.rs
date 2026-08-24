@@ -13,29 +13,36 @@ Prince of Persia 2D — l'aventure vue du dessus
 USAGE
     pop2d [OPTIONS]
 
-OPTIONS
-    -s, --seed <N>      graine du générateur aléatoire
+MODES
+    (défaut)            fenêtre graphique native 960x640, rendu lisse
+        --tty           l'aventure dans le terminal (demi-blocs)
         --validate      vérifier tous les mondes (parsing + portails + connexité)
         --map <W>       afficher la carte ASCII du monde W
-        --shot <FIC>    écrire une capture PNG (rendu tête haute)
+        --shot <FIC>    écrire une capture PNG 800x600 (SVGA natif)
+
+OPTIONS
+    -s, --seed <N>      graine du générateur aléatoire
         --world <W>     (avec --shot) monde à cadrer
         --at <TX,TY>    (avec --shot) placer le prince sur cette tuile
         --frames <N>    (avec --shot) simuler N images avant la capture
-        --size <LxH>    taille de la capture en pixels (défaut 800x600, SVGA)
+        --size <LxH>    taille de la capture en pixels (défaut 800x600)
         --zoom <N>      agrandissement entier du PNG (1 = résolution native)
     -h, --help          afficher cette aide
 
-COMMANDES EN JEU
-    ← ↑ ↓ →     marcher            Espace / X   frapper
-    +/-         changer la vue     P / Échap    pause
-    R           recommencer        F1           commandes
-    Q           quitter
+COMMANDES EN JEU (fenêtre)
+    ← ↑ ↓ → / ZQSD   marcher       Espace / X   frapper (maintenir !)
+    + / -            vue           P pause      R recommencer le monde
+    Q / Échap        quitter
+
+COMMANDES EN JEU (terminal)
+    ← ↑ ↓ →          marcher       Espace / X   frapper
+    +/-              vue           P pause      F1 aide     Q quitter
 ";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut seed = 0x5EEDu64;
-    let mut mode = Mode::Play;
+    let mut mode = Mode::Window;
     let mut shot = String::new();
     let mut world_ix = world::LIGHT_REALM;
     let mut at: Option<(i32, i32)> = None;
@@ -57,6 +64,7 @@ fn main() {
             }
             "-s" | "--seed" => seed = next(&mut i).parse().unwrap_or(0x5EED),
             "--validate" => mode = Mode::Validate,
+            "--tty" => mode = Mode::Tty,
             "--map" => {
                 mode = Mode::Map;
                 world_ix = next(&mut i).parse::<usize>().unwrap_or(0).min(world::WORLD_COUNT - 1);
@@ -88,7 +96,13 @@ fn main() {
     }
 
     match mode {
-        Mode::Play => {
+        Mode::Window => {
+            if let Err(e) = adventure::window::play_window(seed) {
+                eprintln!("erreur : {e}");
+                std::process::exit(1);
+            }
+        }
+        Mode::Tty => {
             if let Err(e) = adventure::app::play(seed) {
                 eprintln!("erreur : {e}");
                 std::process::exit(1);
@@ -116,7 +130,8 @@ fn main() {
 }
 
 enum Mode {
-    Play,
+    Window,
+    Tty,
     Validate,
     Map,
     Shot,

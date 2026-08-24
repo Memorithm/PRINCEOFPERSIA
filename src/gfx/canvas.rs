@@ -34,6 +34,13 @@ impl Canvas {
         }
     }
 
+    /// Direct pixel write, silently out-of-bounds safe (HUD, bitmap font).
+    pub fn set_pixel(&mut self, x: i32, y: i32, c: Rgb) {
+        if x >= 0 && y >= 0 && x < self.w && y < self.h {
+            self.px[(y * self.w + x) as usize] = c;
+        }
+    }
+
     pub fn resize(&mut self, w: i32, h: i32) {
         let w = w.max(1);
         let h = h.max(1);

@@ -42,15 +42,25 @@ le test d'intégration.
 cargo run --release --bin pop2d
 ```
 
-Un Zelda-like en vue du dessus, rendu en vectoriel lisse par le même pipeline
-que le jeu de plateforme : palettes fortes par monde, tuiles à face éclairée,
-eau animée et scintillante, ombres portées douces, éclairage en une passe
-(braseros, portails, fée), personnages directionnels animés, sols aux tons
-organiques — sans trame ni pixelisation volontaire.
+Ouvre une **fenêtre graphique native 960 × 640** (minifb) : le moteur vectoriel
+y rend en lisse, sans la limite des 2 pixels par cellule du terminal. Même
+moteur, même rendu que les captures ci-dessous — c'est-à-dire quelque chose de
+proche du rendu SVGA, en direct.
 
-Le rendu est vectoriel et sur-échantillonné : il se joue net à la taille du
-terminal et les captures sortent en **800 × 600 natif (SVGA)** — la vue par
-défaut en jeu montre 8 tuiles de haut (prince bien lisible), `+` élargit.
+| Touche (fenêtre) | Effet |
+|---|---|
+| `←` `↑` `→` `↓` ou `ZQSD` | marcher (diagonales comprises) |
+| `Espace` / `X` | frapper — **maintenir** enchaîne les coups |
+| `+` / `-` | élargir / rapprocher la vue |
+| `P` | pause · `R` recommencer le monde courant |
+| `Q` / `Échap` | quitter |
+
+`pop2d --tty` lance l'adaptation terminal (demi-blocs) pour les sessions SSH —
+même jeu, rendu limité par la grille de caractères.
+
+Le HUD tient dans le bandeau supérieur : cœurs, gemmes, clés, les **4 fragments
+du sceau** (dorés une fois arrachés à leur boss), le miroir et l'épée d'argent ;
+le nom du monde à droite, les messages en bas.
 
 ![La Vallée d'Ispahan](docs/adventure-valley.png)
 
@@ -106,9 +116,9 @@ monde à l'autre, sur place.
 | Touche | Effet |
 |---|---|
 | `←` `↑` `→` `↓` | marcher (diagonales comprises) |
-| `Espace` / `X` | frapper à l'épée |
+| `Espace` / `X` | frapper à l'épée — maintenir pour enchaîner |
 | `+` `-` | rapprocher / éloigner la vue |
-| `P` / `Échap` | pause · `R` recommencer le monde courant · `H` aide · `Q` quitter |
+| `P` / `Échap` | pause · `R` recommencer le monde courant · `Q` quitter |
 
 Mourir rend au départ du monde courant, cœurs pleins ; l'inventaire (gemmes,
 clés, fragments, reliques) traverse les mondes et les morts.
@@ -170,9 +180,10 @@ src/adventure/
   mod.rs         état de jeu, simulation (déplacements, IA, tirs, quête, caméra)
   world.rs       tuiles, objets, bestiaire, parsing, portails, départs
   world_data.rs  les 15 cartes — générées, ne pas éditer à la main
-  render.rs      rendu SNES : palettes, tuiles, personnages, éclairage
-  app.rs         boucle terminale, menus, HUD
-src/bin/pop2d.rs CLI (--validate / --map / --shot)
+  render.rs      rendu vectoriel : palettes, tuiles, personnages, éclairage
+  window.rs      fenêtre native 960x640 (minifb) : HUD vectoriel, mini-police
+  app.rs         adaptation terminal (--tty), menus, HUD demi-blocs
+src/bin/pop2d.rs CLI (fenêtre / --tty / --validate / --map / --shot)
 tools/genmaps.py générateur + validateur des mondes
 ```
 
