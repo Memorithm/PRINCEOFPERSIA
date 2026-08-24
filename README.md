@@ -39,28 +39,32 @@ le test d'intégration.
 ## Lancer l'aventure
 
 ```sh
-cargo run --release --bin pop2d
+cargo run --release            # fenêtre graphique native 960 x 640 (minifb)
+cargo run --release --bin pop2d -- --tty    # dans le terminal (SSH, PuTTY…)
 ```
 
-Ouvre une **fenêtre graphique native 960 × 640** (minifb) : le moteur vectoriel
-y rend en lisse, sans la limite des 2 pixels par cellule du terminal. Même
-moteur, même rendu que les captures ci-dessous — c'est-à-dire quelque chose de
-proche du rendu SVGA, en direct.
+Un Zelda-like en vue du dessus rendu par le moteur vectoriel maison : palettes
+fortes par monde, tuiles à face éclairée, eau animée et scintillante, ombres
+douces, éclairage en une passe (braseros, portails, fée), personnages
+directionnels animés, sols aux tons organiques.
 
-| Touche (fenêtre) | Effet |
-|---|---|
-| `←` `↑` `→` `↓` ou `ZQSD` | marcher (diagonales comprises) |
-| `Espace` / `X` | frapper — **maintenir** enchaîne les coups |
-| `+` / `-` | élargir / rapprocher la vue |
-| `P` | pause · `R` recommencer le monde courant |
-| `Q` / `Échap` | quitter |
+**En fenêtre** : rendu lisse plein cadre, HUD vectoriel (cœurs battants,
+gemmes, clés, les 4 fragments du sceau, miroir, épée), messages, pause.
+Flèches ou `ZQSD` pour marcher, `Espace`/`X` pour frapper (maintenir pour
+enchaîner), `+`/`-` pour la vue, `P` pause, `R` recommencer, `Q`/`Échap` pour
+quitter.
 
-`pop2d --tty` lance l'adaptation terminal (demi-blocs) pour les sessions SSH —
-même jeu, rendu limité par la grille de caractères.
+**Via SSH / PuTTY (sans écran sur le serveur)** : l'ouverture de la fenêtre
+échoue et le jeu bascule tout seul dans le terminal. Deux options :
 
-Le HUD tient dans le bandeau supérieur : cœurs, gemmes, clés, les **4 fragments
-du sceau** (dorés une fois arrachés à leur boss), le miroir et l'épée d'argent ;
-le nom du monde à droite, les messages en bas.
+1. **Jouer dans le terminal** — `--tty` ou le repli automatique. La vue
+   s'auto-ajuste à la taille de la fenêtre (un PuTTY 80×24 affiche 6 tuiles de
+   haut, `+` élargit jusqu'à 16) ; il faut un terminal truecolor (PuTTY ≥ 0.78,
+   Windows Terminal, kitty…) ;
+2. **Avoir la vraie fenêtre** — installer un serveur X sur ta machine
+   ([VcXsrv](https://sourceforge.net/projects/vcxsrv/) ou Xming sous Windows),
+   cocher « Enable X11 forwarding » dans PuTTY (Connexion → SSH → X11), et
+   relancer `cargo run --release`.
 
 ![La Vallée d'Ispahan](docs/adventure-valley.png)
 
@@ -584,7 +588,7 @@ rebord qu'il est censé agripper. Rien d'autre ne relie ces deux nombres.
 ## Tests
 
 ```sh
-cargo test              # 37 tests
+cargo test              # 50 tests
 cargo test --release    # même chose, en plus rapide
 ```
 

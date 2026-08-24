@@ -22,9 +22,9 @@ const FRAME_60: Duration = Duration::from_micros(16_667);
 /// Fixed simulation step, as in the classic engine.
 const SIM_DT: f32 = 1.0 / 120.0;
 const MAX_CATCHUP: f32 = 0.25;
-/// View heights in tiles, per zoom step. The default (8 tiles) keeps the
-/// prince at a readable size even on a 30-row terminal; `+` widens the view.
-const VIEWS_TALL: [f32; 4] = [8.0, 10.0, 13.0, 16.0];
+/// View heights in tiles, per zoom step. The default is auto-fitted to the
+/// terminal so every tile keeps at least ~6 device pixels.
+const VIEWS_TALL: [f32; 5] = [6.0, 8.0, 10.0, 13.0, 16.0];
 const MIN_COLS: i32 = 56;
 const MIN_ROWS: i32 = 14;
 
@@ -74,6 +74,13 @@ impl App {
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
         let enhanced = event::poll(Duration::ZERO).is_ok()
             && terminal::supports_keyboard_enhancement().unwrap_or(false);
+        // Vue auto : la plus large qui garde ~6 pixels device par tuile
+        // (un PuTTY de 80x24 y arrive à 6 tuiles, un terminal de 40 lignes à 10).
+        let dev_h = (r as i32 - HUD_TOP - HUD_BOTTOM).max(2) * 2;
+        let zoom_ix = VIEWS_TALL
+            .iter()
+            .rposition(|&t| dev_h as f32 / t >= 6.0)
+            .unwrap_or(0);
         Ok(App {
             screen: Screen::new(c as i32, r as i32),
             canvas: Canvas::new(320, 160),
@@ -86,7 +93,7 @@ impl App {
             menu_sel: 0,
             total_time: 0.0,
             seed,
-            zoom_ix: 0,
+            zoom_ix,
             acc: 0.0,
             frame: FRAME_60,
             dead_t: 0.0,
