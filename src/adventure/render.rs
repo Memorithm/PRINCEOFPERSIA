@@ -366,7 +366,7 @@ fn wrect(t: &mut impl Target, cam: &Cam, x: f32, y: f32, w: f32, h: f32, col: Rg
 }
 
 /// Filled circle (world centre, world radius).
-fn wcircle(t: &mut impl Target, cam: &Cam, c: V2, r: f32, col: Rgb, n: usize) {
+pub(crate) fn wcircle(t: &mut impl Target, cam: &Cam, c: V2, r: f32, col: Rgb, n: usize) {
     let cc = cam.p(c);
     let rr = cam.l(r);
     let mut pts = Vec::with_capacity(n);
@@ -377,21 +377,30 @@ fn wcircle(t: &mut impl Target, cam: &Cam, c: V2, r: f32, col: Rgb, n: usize) {
     poly(t, &pts, col);
 }
 
-fn wline(t: &mut impl Target, cam: &Cam, a: V2, b: V2, wdt: f32, col: Rgb) {
+pub(crate) fn wline(t: &mut impl Target, cam: &Cam, a: V2, b: V2, wdt: f32, col: Rgb) {
     crate::art::shape::contour(t, cam.p(a), cam.p(b), cam.l(wdt), col, 1.0);
 }
 
-/// Soft round shadow under an entity.
+/// Filled polygon given in world coordinates.
+pub(crate) fn wpoly(t: &mut impl Target, cam: &Cam, pts: &[V2], col: Rgb) {
+    let screen: Vec<V2> = pts.iter().map(|p| cam.p(*p)).collect();
+    poly(t, &screen, col);
+}
+
+/// Soft round shadow under an entity — two nested ellipses fake a blur.
 fn shadow(t: &mut impl Target, cam: &Cam, at: V2, rx: f32, ry: f32, alpha: f32) {
     let c = cam.p(at);
-    let (rx, ry) = (cam.l(rx), cam.l(ry));
     let n = 14;
     let mut pts = Vec::with_capacity(n);
     for i in 0..n {
         let a = i as f32 / n as f32 * std::f32::consts::TAU;
-        pts.push(v2(c.x + a.cos() * rx, c.y + a.sin() * ry));
+        pts.push(v2(a.cos(), a.sin()));
     }
-    crate::art::shape::flat(t, &pts, Rgb::BLACK, alpha * 0.35);
+    for (scale, k) in [(1.25f32, 0.45f32), (0.92, 0.75)] {
+        let (rx, ry) = (cam.l(rx * scale), cam.l(ry * scale));
+        let ring: Vec<V2> = pts.iter().map(|d| v2(c.x + d.x * rx, c.y + d.y * ry)).collect();
+        crate::art::shape::flat(t, &ring, Rgb::BLACK, alpha * 0.35 * k);
+    }
 }
 
 // ---------------------------------------------------------------- terrain
@@ -407,7 +416,12 @@ fn draw_tile(g: &Game, t: &mut Canvas, cam: &Cam, tx: i32, ty: i32, time: f32) {
 
     match tile {
         Tile::Grass | Tile::Flower => {
-            let base = if hf(1) < 0.5 { p.ground_a } else { p.ground_b };
+            // Slow, organic drift of tone across the meadow — no checkerboard.
+            let drift = (noise1(x * 0.021 + y * 0.029, 11) * 0.5 + 0.5).clamp(0.0, 1.0);
+            let base = p
+                .ground_a
+                .lerp(p.ground_b, drift)
+                .lerp(p.ground_speck, (drift - 0.5).abs() * 0.5);
             wrect(t, cam, x, y, TILE + 0.5, TILE + 0.5, base);
             // Tufts of grass.
             let tufts = 3 + (h % 3) as usize;
@@ -432,7 +446,11 @@ fn draw_tile(g: &Game, t: &mut Canvas, cam: &Cam, tx: i32, ty: i32, time: f32) {
             }
         }
         Tile::Floor | Tile::Portal | Tile::Cave | Tile::MirrorSlab => {
-            let base = if hf(1) < 0.5 { p.ground_a } else { p.ground_b };
+            let drift = (noise1(x * 0.025 + y * 0.033, 13) * 0.5 + 0.5).clamp(0.0, 1.0);
+            let base = p
+                .ground_a
+                .lerp(p.ground_b, drift)
+                .lerp(p.ground_speck, (drift - 0.5).abs() * 0.4);
             wrect(t, cam, x, y, TILE + 0.5, TILE + 0.5, base);
             // Speckles + faint slab seams.
             for k in 0..4 {
@@ -469,6 +487,14 @@ fn draw_tile(g: &Game, t: &mut Canvas, cam: &Cam, tx: i32, ty: i32, time: f32) {
                 let wy = y + 6.0 + k as f32 * 10.0 + phase.sin() * 2.0;
                 let wx = x + 4.0 + ((phase * 0.7).sin() * 0.5 + 0.5) * 6.0;
                 wline(t, cam, v2(wx, wy), v2(wx + 9.0, wy), 1.6, p.water_hi);
+            }
+            // Occasional sun glints.
+            let tw = (time * 1.6 + hf(8) * std::f32::consts::TAU).sin();
+            if tw > 0.86 {
+                let gx = x + 5.0 + hf(9) * 14.0;
+                let gy = y + 5.0 + hf(10) * 14.0;
+                let g = (tw - 0.86) / 0.14;
+                wcircle(t, cam, v2(gx, gy), 1.6 * g, rgb(240, 250, 255), 6);
             }
             // Foam on shores facing land.
             let up = !g.world().tile(tx, ty - 1).solid();
@@ -1640,14 +1666,14 @@ pub fn draw(g: &Game, cv: &mut Canvas, layer: &mut Layer, light: &mut LightField
     }
     light.apply(cv);
 
-    // Post: gentle vignette + ordered dither for the retro finish.
+    // Post: a whisper of vignette — no dithering, the look stays smooth and
+    // fine-grained rather than retro-pixelated.
     let vig_tint = match g.theme() {
         ThemeName::Valley => rgb(40, 30, 20),
         ThemeName::Palace => rgb(40, 30, 24),
         _ => rgb(14, 8, 22),
     };
-    cv.vignette(0.34, vig_tint);
-    crate::gfx::canvas::dither(cv, 5.0);
+    cv.vignette(0.16, vig_tint);
 
     // Emissive overlay (flames etc.) drawn additively on top.
     cv.blend = Blend::Add;

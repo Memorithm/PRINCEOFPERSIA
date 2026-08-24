@@ -9,6 +9,7 @@
 
 pub mod app;
 pub mod render;
+pub mod window;
 pub mod world;
 pub mod world_data;
 
@@ -21,13 +22,15 @@ use world::{FoeKind, Pickup, Portal, ThemeName, Tile, World, LIGHT_REALM, TILE, 
 pub const PLAYER_SPEED: f32 = 92.0;
 pub const PLAYER_RADIUS: f32 = 7.0;
 /// Duration of a sword stroke, seconds.
-pub const ATTACK_TIME: f32 = 0.22;
+pub const ATTACK_TIME: f32 = 0.18;
 /// Recovery between strokes.
-pub const ATTACK_COOLDOWN: f32 = 0.34;
+pub const ATTACK_COOLDOWN: f32 = 0.26;
 /// How far in front of him the blade bites.
-pub const SWORD_REACH: f32 = 15.0;
+pub const SWORD_REACH: f32 = 18.0;
 /// Radius of the bite.
-pub const SWORD_ARC: f32 = 13.0;
+pub const SWORD_ARC: f32 = 16.0;
+/// Foes knocked back by a blow fly at this speed.
+pub const FOE_KNOCKBACK: f32 = 170.0;
 /// Invulnerability after taking a hit.
 pub const HURT_INVULN: f32 = 1.0;
 pub const KNOCKBACK: f32 = 130.0;
@@ -109,6 +112,8 @@ pub struct Foe {
     pub cd: f32,
     /// Hit-flash timer.
     pub hurt_t: f32,
+    /// Knockback velocity from the prince's blade, decays fast.
+    pub knock: V2,
     pub alive: bool,
     /// Animation phase.
     pub anim: f32,
@@ -264,7 +269,9 @@ impl Game {
         self.player.p = at.unwrap_or(v2(sx, sy));
         self.player.knock = V2::ZERO;
         self.player.invuln = 0.8;
-        self.warp_grace = 0.7;
+        // Assez long pour ne pas re-déclencher le portail d'arrivée, assez
+        // court pour ne pas traverser le suivant en marchant.
+        self.warp_grace = 0.45;
         if reset_foes {
             let spawns = w.spawns.clone();
             self.foes = spawns
@@ -279,6 +286,7 @@ impl Game {
                     t: self.rng.range(0.0, 1.0),
                     cd: self.rng.range(0.4, 1.6),
                     hurt_t: 0.0,
+                    knock: V2::ZERO,
                     alive: true,
                     anim: self.rng.unit() * 10.0,
                 })
@@ -307,8 +315,14 @@ impl Game {
     fn try_move(&self, p: &mut V2, dx: f32, dy: f32) {
         let r = PLAYER_RADIUS;
         let cand = p.add(v2(dx, dy));
-        let (x0, x1) = ((cand.x - r).floor() as i32, (cand.x + r).floor() as i32);
-        let (y0, y1) = ((cand.y - r).floor() as i32, (cand.y + r).floor() as i32);
+        let (x0, x1) = (
+            ((cand.x - r) / TILE).floor() as i32,
+            ((cand.x + r) / TILE).floor() as i32,
+        );
+        let (y0, y1) = (
+            ((cand.y - r) / TILE).floor() as i32,
+            ((cand.y + r) / TILE).floor() as i32,
+        );
         let mut hit = false;
         'outer: for ty in y0..=y1 {
             for tx in x0..=x1 {
@@ -328,25 +342,31 @@ impl Game {
         // Slide to the wall face on the blocked axis only.
         let nx = if dx != 0.0 {
             if dx > 0.0 {
-                (cand.x + r).floor() as f32 - r - 0.01
+                ((cand.x + r) / TILE).floor() * TILE - r - 0.01
             } else {
-                (cand.x - r).floor() as f32 + 1.0 + r + 0.01
+                ((cand.x - r) / TILE).floor() * TILE + TILE + r + 0.01
             }
         } else {
             p.x
         };
         let ny = if dy != 0.0 {
             if dy > 0.0 {
-                (cand.y + r).floor() as f32 - r - 0.01
+                ((cand.y + r) / TILE).floor() * TILE - r - 0.01
             } else {
-                (cand.y - r).floor() as f32 + 1.0 + r + 0.01
+                ((cand.y - r) / TILE).floor() * TILE + TILE + r + 0.01
             }
         } else {
             p.y
         };
         let probe = v2(nx, ny);
-        let (bx0, bx1) = ((probe.x - r).floor() as i32, (probe.x + r).floor() as i32);
-        let (by0, by1) = ((probe.y - r).floor() as i32, (probe.y + r).floor() as i32);
+        let (bx0, bx1) = (
+            ((probe.x - r) / TILE).floor() as i32,
+            ((probe.x + r) / TILE).floor() as i32,
+        );
+        let (by0, by1) = (
+            ((probe.y - r) / TILE).floor() as i32,
+            ((probe.y + r) / TILE).floor() as i32,
+        );
         let mut bh = false;
         'o2: for ty in by0..=by1 {
             for tx in bx0..=bx1 {
@@ -462,7 +482,7 @@ impl Game {
             }
         }
 
-        let swung = input.attack && pl.cooldown <= 0.0;
+        let swung = (input.attack || input.attack_held) && pl.cooldown <= 0.0;
         if swung {
             pl.attack_t = ATTACK_TIME;
             pl.cooldown = ATTACK_COOLDOWN;
@@ -509,6 +529,11 @@ impl Game {
             foe.hp -= dmg;
             foe.hurt_t = 0.18;
             foe.dir = f.mul(-1.0); // stagger backwards
+            // The blow sends the foe flying away from the prince; bosses
+            // barely budge.
+            let kb = if foe.kind.is_boss() { 0.45 } else { 1.0 };
+            foe.knock = f.mul(FOE_KNOCKBACK * kb);
+            foe.t = foe.t.max(0.28); // brief stun: the AI loses its beat
             let heavy = dmg > 1;
             self.fx.sparks(
                 foe.p.add(v2(0.0, -4.0)),
@@ -528,6 +553,7 @@ impl Game {
         };
         self.foes[ix].alive = false;
         self.kills += 1;
+        self.cam_shake = self.cam_shake.max(0.35);
         self.fx.sparks(fp, 16, 1.4);
         self.fx
             .dust(fp, 8, 1.0, crate::gfx::color::rgb(160, 150, 140));
@@ -651,6 +677,7 @@ impl Game {
             }
             foe.anim += dt * (if foe.kind == FoeKind::Bat { 14.0 } else { 6.0 });
             foe.hurt_t = (foe.hurt_t - dt).max(0.0);
+            foe.knock = foe.knock.mul((-dt * 9.0).exp());
             foe.cd -= dt;
             foe.t -= dt;
             let to_pl = pl_p.sub(foe.p);
@@ -861,6 +888,8 @@ impl Game {
                 }
             }
 
+            // Knockback from the prince's blade dominates while it lasts.
+            let vel = if foe.knock.len() > 4.0 { foe.knock } else { vel };
             if vel.len() > 0.5 {
                 let nx = foe.p.x + vel.x * dt;
                 if free(v2(nx, foe.p.y), 6.0) {
@@ -905,6 +934,7 @@ impl Game {
                     t: 1.0,
                     cd: 1.0,
                     hurt_t: 0.0,
+                    knock: V2::ZERO,
                     alive: true,
                     anim: 0.0,
                 });

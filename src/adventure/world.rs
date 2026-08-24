@@ -222,7 +222,7 @@ impl FoeKind {
             FoeKind::Bat => 1,
             FoeKind::Grunt => 2,
             FoeKind::Djinn => 2,
-            FoeKind::Knight => 3,
+            FoeKind::Knight => 2,
             FoeKind::Ogre => 8,
             FoeKind::BossKnight => 12,
             FoeKind::CrystalGolem => 14,

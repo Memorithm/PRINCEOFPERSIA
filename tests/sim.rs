@@ -335,6 +335,7 @@ fn the_campaign_survives_random_input() {
                 down_edge: rng.chance(0.08),
                 left_edge: rng.chance(0.08),
                 right_edge: rng.chance(0.10),
+                attack_held: rng.chance(0.05),
             };
             g.update(DT, &inp);
             if matches!(g.phase, Phase::Dead) {
