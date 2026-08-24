@@ -325,79 +325,88 @@ impl StressPropagationSystem {
     /// Propagates structural loads horizontally & vertically on a tile grid.
     /// Deducts health when stress exceeds resistance, collapses tiles,
     /// and dynamically flags navigation blocks on the map.
+    ///
+    /// Tiles are indexed by grid coordinate once up front, so each impact and
+    /// each collapse touches only the tiles it actually affects instead of
+    /// scanning the whole world. Every tile at or below zero health is collapsed
+    /// — nothing is silently dropped, whatever the collapse count.
     pub fn update(
         world: &mut EcsWorld,
         nav_map: &mut NavigationMap,
         impacts: &[(i32, i32, f32)], // (grid_x, grid_y, force)
     ) {
-        // Step 1: Apply immediate impact damages
-        for &(ix, iy, force) in impacts {
-            for maybe_tile in world.tiles.iter_mut() {
-                if let Some(tile) = maybe_tile {
-                    if tile.grid_x == ix && tile.grid_y == iy {
-                        tile.health -= force;
-                        tile.accumulated_stress += force * 0.5;
-                    }
+        // Index tiles by grid coordinate: (x, y) -> entity storage index.
+        let mut index: std::collections::HashMap<(i32, i32), usize> =
+            std::collections::HashMap::new();
+        for (i, t) in world.tiles.iter().enumerate() {
+            if let Some(tile) = t {
+                if tile.material != MaterialType::Space {
+                    index.insert((tile.grid_x, tile.grid_y), i);
                 }
             }
         }
 
-        // Step 2: Stress propagation and collapse loops (zero allocations inside logic)
-        let mut changes = true;
+        // Step 1: Apply immediate impact damages.
+        for &(ix, iy, force) in impacts {
+            if let Some(&i) = index.get(&(ix, iy)) {
+                if let Some(tile) = &mut world.tiles[i] {
+                    tile.health -= force;
+                    tile.accumulated_stress += force * 0.5;
+                }
+            }
+        }
+
+        // Step 2: Collapse and propagate until stable (bounded by tile count).
         let mut iterations = 0;
-        while changes && iterations < 5 {
-            changes = false;
+        let max_iterations = world.tiles.len() + 1;
+        while iterations < max_iterations {
             iterations += 1;
 
-            // Collect collapse markers
-            let mut collapse_coords = [(0, 0); 32];
-            let mut collapse_count = 0;
-
-            for maybe_tile in world.tiles.iter() {
-                if let Some(tile) = maybe_tile {
+            // Collect everything at or below zero health this pass.
+            let mut to_collapse: Vec<(i32, i32)> = Vec::new();
+            for t in world.tiles.iter() {
+                if let Some(tile) = t {
                     if tile.health <= 0.0 && tile.material != MaterialType::Space {
-                        if collapse_count < collapse_coords.len() {
-                            collapse_coords[collapse_count] = (tile.grid_x, tile.grid_y);
-                            collapse_count += 1;
-                        }
+                        to_collapse.push((tile.grid_x, tile.grid_y));
                     }
                 }
             }
+            if to_collapse.is_empty() {
+                break;
+            }
 
-            // Perform collapses and transfer stress to direct neighbors
-            for idx in 0..collapse_count {
-                let (cx, cy) = collapse_coords[idx];
+            for (cx, cy) in to_collapse {
                 let mut collapsed_stress = 0.0;
-
-                // Turn the collapsed tile into Space
-                for maybe_tile in world.tiles.iter_mut() {
-                    if let Some(tile) = maybe_tile {
-                        if tile.grid_x == cx && tile.grid_y == cy && tile.material != MaterialType::Space {
+                if let Some(&i) = index.get(&(cx, cy)) {
+                    if let Some(tile) = &mut world.tiles[i] {
+                        if tile.material != MaterialType::Space && tile.health <= 0.0 {
                             collapsed_stress = tile.accumulated_stress;
                             tile.material = MaterialType::Space;
                             tile.health = 0.0;
-                            changes = true;
-
-                            // Update navigation map: space is walkable, wall/solids were not
-                            if cx >= 0 && (cx as usize) < nav_map.width && cy >= 0 && (cy as usize) < nav_map.height {
-                                nav_map.set_navigable(cx as usize, cy as usize, true);
-                            }
                         }
                     }
                 }
 
-                // Propagate stress to direct neighbors: (up, down, left, right)
+                // Update navigation map: the cell is now walkable.
+                if cx >= 0
+                    && (cx as usize) < nav_map.width
+                    && cy >= 0
+                    && (cy as usize) < nav_map.height
+                {
+                    nav_map.set_navigable(cx as usize, cy as usize, true);
+                }
+
+                // Transfer stress to the four direct neighbours.
                 let neighbors = [(cx, cy - 1), (cx, cy + 1), (cx - 1, cy), (cx + 1, cy)];
                 for &(nx, ny) in &neighbors {
-                    for maybe_tile in world.tiles.iter_mut() {
-                        if let Some(tile) = maybe_tile {
-                            if tile.grid_x == nx && tile.grid_y == ny && tile.material != MaterialType::Space {
-                                let transferred = collapsed_stress * 1.0;
-                                tile.accumulated_stress += transferred;
+                    if let Some(&i) = index.get(&(nx, ny)) {
+                        if let Some(tile) = &mut world.tiles[i] {
+                            if tile.material != MaterialType::Space {
+                                tile.accumulated_stress += collapsed_stress;
                                 if tile.accumulated_stress > tile.material.stress_resistance() {
-                                    let damage = tile.accumulated_stress - tile.material.stress_resistance();
+                                    let damage =
+                                        tile.accumulated_stress - tile.material.stress_resistance();
                                     tile.health -= damage;
-                                    changes = true;
                                 }
                             }
                         }

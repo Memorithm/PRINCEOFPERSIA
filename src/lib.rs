@@ -12,6 +12,7 @@
 //! * [`game`] — simulation: the prince's state machine, guards, combat, items.
 //! * [`input`], [`app`] — keyboard handling and the terminal application loop.
 
+pub mod adventure;
 pub mod app;
 pub mod art;
 pub mod game;

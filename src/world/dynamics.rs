@@ -58,10 +58,19 @@ impl Dynamics {
         }
     }
 
+    /// Mutable cell state. Out-of-bounds coordinates return `None` instead of
+    /// silently aliasing cell (0, 0).
     #[inline]
-    pub fn at(&mut self, tx: i32, ty: i32) -> &mut CellDyn {
-        let i = self.idx(tx, ty).unwrap_or(0);
-        &mut self.v[i]
+    pub fn at(&mut self, tx: i32, ty: i32) -> Option<&mut CellDyn> {
+        self.idx(tx, ty).map(|i| &mut self.v[i])
+    }
+
+    /// Checked variant for the hot loops that already know the tile exists.
+    #[inline]
+    pub fn set_a(&mut self, tx: i32, ty: i32, a: f32) {
+        if let Some(c) = self.at(tx, ty) {
+            c.a = a;
+        }
     }
 
     #[inline]

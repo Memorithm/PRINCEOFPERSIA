@@ -125,7 +125,6 @@ impl Game {
     }
 
     pub fn update_shots(&mut self, dt: f32) {
-        let mut hits: Vec<(usize, Option<usize>, V2)> = Vec::new();
         let mut player_hits: Vec<(usize, V2, f32)> = Vec::new();
 
         for s in self.shots.iter_mut() {
@@ -138,33 +137,36 @@ impl Game {
             s.p.y += s.v.y * dt;
         }
 
-        // Terrain and character collisions.
-        let shots = self.shots.clone();
-        for (i, s) in shots.iter().enumerate() {
-            let tx = Level::tx_of(s.p.x);
-            let ty = Level::ty_of(s.p.y);
-            let solid = !self.open(tx, ty);
-            if solid || s.life <= 0.0 {
-                hits.push((i, None, s.p));
-                continue;
-            }
-            if s.friendly {
-                for (gi, g) in self.guards.iter().enumerate() {
-                    if g.st == crate::game::GState::Dead || !g.hostile() {
-                        continue;
+        // Terrain and character collisions — read-only pass, no clone needed.
+        let hits: Vec<(usize, Option<usize>, V2)> = self
+            .shots
+            .iter()
+            .enumerate()
+            .filter_map(|(i, s)| {
+                let tx = Level::tx_of(s.p.x);
+                let ty = Level::ty_of(s.p.y);
+                let solid = !self.open(tx, ty);
+                if solid || s.life <= 0.0 {
+                    return Some((i, None, s.p));
+                }
+                if s.friendly {
+                    for (gi, g) in self.guards.iter().enumerate() {
+                        if g.st == crate::game::GState::Dead || !g.hostile() {
+                            continue;
+                        }
+                        if (g.p.x - s.p.x).abs() < 11.0 && (g.p.y - 15.0 - s.p.y).abs() < 17.0 {
+                            return Some((i, Some(gi), s.p));
+                        }
                     }
-                    if (g.p.x - s.p.x).abs() < 11.0 && (g.p.y - 15.0 - s.p.y).abs() < 17.0 {
-                        hits.push((i, Some(gi), s.p));
-                        break;
+                } else {
+                    let pl = &self.player;
+                    if (pl.p.x - s.p.x).abs() < 10.0 && (pl.p.y - 15.0 - s.p.y).abs() < 16.0 {
+                        player_hits.push((i, s.p, s.v.x.signum()));
                     }
                 }
-            } else {
-                let pl = &self.player;
-                if (pl.p.x - s.p.x).abs() < 10.0 && (pl.p.y - 15.0 - s.p.y).abs() < 16.0 {
-                    player_hits.push((i, s.p, s.v.x.signum()));
-                }
-            }
-        }
+                None
+            })
+            .collect();
 
         // Resolve, from the end so indices stay valid.
         let mut dead: Vec<usize> = Vec::new();

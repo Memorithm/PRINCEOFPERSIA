@@ -4,15 +4,16 @@ Une réécriture du *Prince of Persia* de Jordan Mechner (1989) : six niveaux
 inédits, tous plus grands que n'importe quel niveau de l'original, des armes
 bonus, et des personnages dessinés en polygones plutôt qu'en sprites.
 
-Le jeu existe en deux versions dans ce dépôt :
+Le dépôt contient **trois jeux** :
 
 | | moteur | où | pour quoi |
 |---|---|---|---|
 | **Godot** | Godot 4.3, GDScript | [`godot/`](godot/) | la version jouable : plein écran, lumières dynamiques, son |
-| **terminal** | Rust, sans dépendance hors `crossterm` | [`src/`](src/) | la même partie dans une fenêtre de commande, en demi-blocs 24 bits |
+| **terminal** | Rust, sans dépendance hors `crossterm` | [`src/`](src/) (`pop`) | la même partie dans une fenêtre de commande, en demi-blocs 24 bits |
+| **aventure top-down** | Rust, même moteur maison | [`src/adventure/`](src/adventure/) (`pop2d`) | une quête façon Zelda SNES : quinze mondes liés, vue du dessus |
 
-Les deux partagent les cartes, la métrique du monde, le répertoire de mouvements
-et le système d'animation ; seule la couche de rendu diffère.
+Les deux versions Rust partagent les cartes, la métrique du monde, le répertoire
+de mouvements et le système d'animation ; seule la couche de rendu diffère.
 
 ## Lancer la version Godot
 
@@ -22,6 +23,154 @@ godot --path godot
 
 Voir [`godot/README.md`](godot/README.md) pour les commandes, l'architecture et
 le test d'intégration.
+
+## L'aventure top-down — sommaire
+
+- [Lancer l'aventure](#lancer-laventure)
+- [La quête des quatre fragments](#la-quête-des-quatre-fragments)
+- [Les quinze mondes](#les-quinze-mondes)
+- [Commandes de l'aventure](#commandes-de-laventure)
+- [Le vocabulaire des cartes](#le-vocabulaire-des-cartes)
+- [Outils de l'aventure](#outils-de-laventure)
+- [Le générateur de mondes](#le-générateur-de-mondes)
+
+---
+
+## Lancer l'aventure
+
+```sh
+cargo run --release --bin pop2d
+```
+
+Un Zelda-like en vue du dessus, rendu en pixel-art 16 bits par le même pipeline
+que le jeu de plateforme : palettes fortes par monde, tuiles à face éclairée,
+eau animée, ombres portées, éclairage en une passe (braseros, portails, fée),
+personnages directionnels animés et vignettage tramé.
+
+![La Vallée d'Ispahan](docs/adventure-valley.png)
+
+## La quête des quatre fragments
+
+Le Vizir **Ganar** a enlevé la princesse **Zahra** et brisé le Sceau de Lumière
+en **quatre fragments**, confiés aux boss des donjons. Le prince doit :
+
+1. réunir les **4 fragments** — la Brute des geôles, le Garde royal du palais,
+   le Golem de cristal, le Pharaon momifié — ;
+2. trouver le **Miroir d'argent** au Palais de Sable : il réveille les dalles
+   d'argent qui font basculer entre la Vallée et son Ombre ;
+3. forger son chemin jusqu'à l'**Épée d'argent** au fond des Mines de Cuivre
+   (chaque botte tranche deux fois plus fort) ;
+4. ouvrir le **Sanctuaire du Miroir** (la porte dorée `L` cède à 4 fragments),
+   gravir la **Tour du Vizir** et affronter **Ganar** sur son Trône des
+   Ténèbres.
+
+En chemin : cœurs, gemmes, petites clés (portes `D`), un **conteneur de cœur**
+caché à l'Oasis du Palmier Bleu, une fée qui soigne, des passages secrets (le
+puits du village, la grotte derrière la cascade, les fougères du sud-ouest) et
+un bestiaire inspiré des classiques — Craborocs, Sbires, Chauve-Kese, Djinns
+des flots et Gardes noirs dont le bouclier pare les coups de face.
+
+## Les quinze mondes
+
+| # | Monde | Rôle | Ce qu'on y trouve |
+|---|---|---|---|
+| 0 | La Vallée d'Ispahan | hub de la Lumière | le village d'Erfan, 7 sorties, cercle des dalles-miroir |
+| 1 | Les Geôles Oubliées | donjon | **fragment 1/4** — la Brute |
+| 2 | Le Palais de Sable | donjon | **fragment 2/4** — le Garde royal, le **Miroir d'argent** |
+| 3 | L'Ombre de la Vallée | hub des Ténèbres | même géographie, lac pétrifié, portes murées |
+| 4 | La Forêt aux Mille Susurrations | labyrinthe | grotte secrète vers les Cavernes |
+| 5 | Les Cavernes de Cristal | donjon | **fragment 3/4** — le Golem de cristal |
+| 6 | Le Désert des Sables Mouvants | plaine | gouffres, la pyramide |
+| 7 | La Nécropole des Rois | donjon | **fragment 4/4** — le Pharaon momifié, porte à clé |
+| 8 | Le Marais des Sangsues | zone sauvage | pontons, Djinns |
+| 9 | Le Col des Vautours | défilé | raccourci vers les Mines |
+| 10 | Les Mines de Cuivre | donjon | l'**Épée d'argent** |
+| 11 | L'Oasis du Palmier Bleu | refuge secret | la **Fée** du lac, un **conteneur de cœur** |
+| 12 | Le Sanctuaire du Miroir | antichambre | porte scellée `L` (4 fragments) |
+| 13 | La Tour du Vizir | donjon final | garde d'élite, portail du trône |
+| 14 | Le Trône des Ténèbres | arène finale | **Ganar** et Zahra |
+
+Les mondes 0 et 3 partagent leurs dalles-miroir (invariant vérifié par le
+générateur) : avec le Miroir d'argent, marcher sur une dalle `M` bascule d'un
+monde à l'autre, sur place.
+
+![Le Désert des Sables Mouvants](docs/adventure-desert.png)
+
+## Commandes de l'aventure
+
+| Touche | Effet |
+|---|---|
+| `←` `↑` `→` `↓` | marcher (diagonales comprises) |
+| `Espace` / `X` | frapper à l'épée |
+| `+` `-` | rapprocher / éloigner la vue |
+| `P` / `Échap` | pause · `R` recommencer le monde courant · `H` aide · `Q` quitter |
+
+Mourir rend au départ du monde courant, cœurs pleins ; l'inventaire (gemmes,
+clés, fragments, reliques) traverse les mondes et les morts.
+
+## Le vocabulaire des cartes
+
+Chaque monde est une carte ASCII, un caractère par tuile de 24 px :
+
+```
+  #  mur        .  sol        ,  herbe      T  arbre     B  buisson
+  R  rocher     ~  eau        %  pont       :  gouffre   S  statue
+  t  brasero    "  fleur      P  départ     D  porte (clé)   L  porte scellée
+  X  portail    C  grotte     M  dalle-miroir
+  h  cœur       g  gemme      k  clé        H  conteneur de cœur
+  i  miroir d'argent   e  épée d'argent
+  V  Erfan      F  la Fée     Y  Zahra
+  o  Craboroc   m  Sbire      b  Chauve-Kese   z  Djinn   n  Garde noir
+  1  Brute (boss)   2  Garde royal (boss)   3  Golem (boss)
+  4  Pharaon (boss)   9  Ganar
+```
+
+## Outils de l'aventure
+
+```sh
+pop2d --validate                    # les 15 mondes : parsing + accessibilité + portails
+pop2d --map 6                       # carte ASCII du Désert, cases atteignables marquées
+pop2d --shot capture.png --world 0 --at 26,20    # capture PNG pleine résolution
+pop2d --shot boss.png --world 5 --at 30,23 --frames 30   # avec 30 frames de simulation
+```
+
+`--validate` vérifie pour chaque monde : largeurs de lignes, départ unique,
+connexité depuis le départ, clés atteignables **sans** ouvrir de porte, tout le
+reste atteignable portes ouvertes, chaque porte touchable, et chaque portail
+qui atterrit sur une case praticable. Code de sortie non nul si un monde est
+cassé — utilisable en intégration continue.
+
+## Le générateur de mondes
+
+Les cartes ne sont pas écrites à la main : `tools/genmaps.py` les construit,
+les valide puis émet `src/adventure/world_data.rs`.
+
+```sh
+python3 tools/genmaps.py
+```
+
+Le générateur pose salles, couloirs, décors et ennemis avec des graines
+déterministes, dégage les zones sensibles *après* les avoir semées, repose les
+portails en fin de construction, puis refuse d'émettre quoi que ce soit si une
+validation échoue. Pour modifier un monde : éditer son `build_*`, relancer le
+générateur, relancer `pop2d --validate`.
+
+![Le Golem de cristal](docs/adventure-golem.png)
+
+### Architecture de l'aventure
+
+```
+src/adventure/
+  mod.rs         état de jeu, simulation (déplacements, IA, tirs, quête, caméra)
+  world.rs       tuiles, objets, bestiaire, parsing, portails, départs
+  world_data.rs  les 15 cartes — générées, ne pas éditer à la main
+  render.rs      rendu SNES : palettes, tuiles, personnages, éclairage
+  app.rs         boucle terminale, menus, HUD
+src/bin/pop2d.rs CLI (--validate / --map / --shot)
+tools/genmaps.py générateur + validateur des mondes
+```
+
+---
 
 ## Version terminal — sommaire
 
@@ -338,6 +487,9 @@ pop --view 2 --level 5         # jouer en vue rapprochée
 pop --help
 ```
 
+L'aventure top-down a ses propres outils (`pop2d --validate`, `--map`,
+`--shot`) — voir [Outils de l'aventure](#outils-de-laventure).
+
 `--validate` sort avec un code non nul si un niveau est cassé, ce qui en fait un
 contrôle utilisable en intégration continue. `--shot` et `--tty-shot` écrivent de
 vrais PNG via l'encodeur maison (`src/gfx/png.rs`), compresseur deflate inclus.
@@ -376,6 +528,8 @@ src/
     hud.rs           affichage tête haute
   input.rs           clavier, protocole étendu et repli par maintien
   app.rs             boucle à pas fixe, cadence adaptative, cadrage, menus
+  adventure/         l'aventure top-down (voir [plus haut](#lancer-laventure)) :
+                     quinze mondes, quête des quatre fragments, rendu SNES
 ```
 
 ### Géométrie du monde
@@ -413,7 +567,7 @@ rebord qu'il est censé agripper. Rien d'autre ne relie ces deux nombres.
 ## Tests
 
 ```sh
-cargo test              # 33 tests
+cargo test              # 37 tests
 cargo test --release    # même chose, en plus rapide
 ```
 
