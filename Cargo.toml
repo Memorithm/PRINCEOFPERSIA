@@ -8,6 +8,7 @@ license = "MIT"
 readme = "README.md"
 keywords = ["game", "roguelike", "terminal", "platformer"]
 categories = ["games"]
+default-run = "pop2d"
 
 [[bin]]
 name = "pop"

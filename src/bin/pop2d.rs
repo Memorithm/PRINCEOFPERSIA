@@ -99,7 +99,18 @@ fn main() {
         Mode::Window => {
             if let Err(e) = adventure::window::play_window(seed) {
                 eprintln!("erreur : {e}");
-                std::process::exit(1);
+                eprintln!();
+                eprintln!("Pas d'affichage graphique disponible (session SSH sans serveur X ?).");
+                eprintln!("Deux options :");
+                eprintln!("  1. Lancer un serveur X sur ta machine (VcXsrv/Xming sous Windows)");
+                eprintln!("     et activer le forwarding X11 dans PuTTY -> la fenêtre marchera ;");
+                eprintln!("  2. Jouer dans le terminal : cargo run --release --bin pop2d -- --tty");
+                eprintln!();
+                eprintln!("Bascule automatique en mode terminal…");
+                if let Err(e) = adventure::app::play(seed) {
+                    eprintln!("erreur : {e}");
+                    std::process::exit(1);
+                }
             }
         }
         Mode::Tty => {

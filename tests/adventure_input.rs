@@ -175,7 +175,6 @@ fn lone_foe(g: &mut Game, kind: FoeKind, offset: (f32, f32)) {
     });
 }
 
-use prince_of_persia_rs::util::V2;
 const V2_ZERO: prince_of_persia_rs::util::V2 = prince_of_persia_rs::util::V2 { x: 0.0, y: 0.0 };
 
 fn face_and_swing(g: &mut Game, steps: u32) {
