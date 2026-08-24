@@ -63,6 +63,8 @@ pub struct Input {
     pub down_edge: bool,
     pub left_edge: bool,
     pub right_edge: bool,
+    /// Attack held down (auto-repeat swings in the adventure).
+    pub attack_held: bool,
 }
 
 impl Input {
@@ -224,6 +226,7 @@ impl Reader {
             down_edge: e(Act::Down),
             left_edge: e(Act::Left),
             right_edge: e(Act::Right),
+            attack_held: h(Act::Attack),
         };
         self.edge = [false; NACT];
         inp
