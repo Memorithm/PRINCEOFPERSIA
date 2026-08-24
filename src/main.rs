@@ -93,8 +93,11 @@ fn main() {
             "--at" => at = parse_pair(&next(&mut i)),
             "--pose" => pose = next(&mut i),
             "--frames" => frames = next(&mut i).parse().unwrap_or(12),
-            "--size" => size = parse_size(&next(&mut i)),
-            "--zoom" => zoom = next(&mut i).parse().unwrap_or(2),
+            "--size" => size = parse_size(&next(&mut i)).map(|(w, h)| {
+                // Bound the capture so a typo cannot ask for gigabytes of pixels.
+                (w.clamp(8, 4096), h.clamp(8, 4096))
+            }),
+            "--zoom" => zoom = next(&mut i).parse::<i32>().unwrap_or(2).clamp(1, 16),
             other => {
                 eprintln!("option inconnue : {other}\n");
                 print!("{USAGE}");

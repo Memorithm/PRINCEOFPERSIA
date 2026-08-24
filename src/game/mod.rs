@@ -225,16 +225,17 @@ impl Game {
         for ty in 0..self.lv.th {
             for tx in 0..self.lv.tw {
                 let t = self.lv.tile(tx, ty);
-                let c = self.dy.at(tx, ty);
-                match t {
-                    Tile::Chomper => {
-                        // Stagger the phase so a row of chompers ripples.
-                        c.b = ((tx * 7 + ty * 13) % 21) as f32 / 21.0 * CHOMP_PERIOD;
+                if let Some(c) = self.dy.at(tx, ty) {
+                    match t {
+                        Tile::Chomper => {
+                            // Stagger the phase so a row of chompers ripples.
+                            c.b = ((tx * 7 + ty * 13) % 21) as f32 / 21.0 * CHOMP_PERIOD;
+                        }
+                        Tile::Spikes => {
+                            c.a = 0.0;
+                        }
+                        _ => {}
                     }
-                    Tile::Spikes => {
-                        c.a = 0.0;
-                    }
-                    _ => {}
                 }
             }
         }
@@ -387,12 +388,13 @@ impl Game {
                 match cell.tile {
                     Tile::PlateRaise | Tile::PlateDrop => {
                         let on = pressed.contains(&(tx, ty));
-                        let d = self.dy.at(tx, ty);
-                        d.a = crate::util::approach(d.a, if on { 1.0 } else { 0.0 }, dt * 7.0);
-                        if on {
-                            d.flag |= F_PRESSED;
-                        } else {
-                            d.flag &= !F_PRESSED;
+                        if let Some(d) = self.dy.at(tx, ty) {
+                            d.a = crate::util::approach(d.a, if on { 1.0 } else { 0.0 }, dt * 7.0);
+                            if on {
+                                d.flag |= F_PRESSED;
+                            } else {
+                                d.flag &= !F_PRESSED;
+                            }
                         }
                     }
                     Tile::Gate | Tile::Exit => {
@@ -400,73 +402,77 @@ impl Game {
                         let latching = g >= 40;
                         let want_up = g != 0 && raise.contains(&g);
                         let want_down = g != 0 && drop.contains(&g);
-                        let d = self.dy.at(tx, ty);
-                        if want_up {
-                            if latching {
-                                d.flag |= F_LATCHED;
+                        if let Some(d) = self.dy.at(tx, ty) {
+                            if want_up {
+                                if latching {
+                                    d.flag |= F_LATCHED;
+                                }
+                                d.b = GATE_HOLD;
                             }
-                            d.b = GATE_HOLD;
+                            if want_down {
+                                d.flag &= !F_LATCHED;
+                                d.b = 0.0;
+                            }
+                            let held = d.flag & F_LATCHED != 0 || d.b > 0.0;
+                            if d.b > 0.0 {
+                                d.b -= dt;
+                            }
+                            let rate = if held { GATE_RISE } else { GATE_FALL };
+                            let goal = if held { 1.0 } else { 0.0 };
+                            d.a = crate::util::approach(d.a, goal, dt * rate);
                         }
-                        if want_down {
-                            d.flag &= !F_LATCHED;
-                            d.b = 0.0;
-                        }
-                        let held = d.flag & F_LATCHED != 0 || d.b > 0.0;
-                        if d.b > 0.0 {
-                            d.b -= dt;
-                        }
-                        let rate = if held { GATE_RISE } else { GATE_FALL };
-                        let goal = if held { 1.0 } else { 0.0 };
-                        d.a = crate::util::approach(d.a, goal, dt * rate);
                     }
                     Tile::Spikes => {
                         // Arm when something is on the tile or the one beside it,
                         // then snap out and stay out for a while.
                         let near = pressed.iter().any(|&(px, py)| py == ty && (px - tx).abs() <= 1);
-                        let d = self.dy.at(tx, ty);
-                        if near {
-                            d.flag |= F_ARMED;
-                            d.b = 1.4;
+                        if let Some(d) = self.dy.at(tx, ty) {
+                            if near {
+                                d.flag |= F_ARMED;
+                                d.b = 1.4;
+                            }
+                            if d.b > 0.0 {
+                                d.b -= dt;
+                            } else {
+                                d.flag &= !F_ARMED;
+                            }
+                            let goal = if d.flag & F_ARMED != 0 { 1.0 } else { 0.0 };
+                            let rate = if goal > 0.5 { 9.0 } else { 2.2 };
+                            d.a = crate::util::approach(d.a, goal, dt * rate);
                         }
-                        if d.b > 0.0 {
-                            d.b -= dt;
-                        } else {
-                            d.flag &= !F_ARMED;
-                        }
-                        let goal = if d.flag & F_ARMED != 0 { 1.0 } else { 0.0 };
-                        let rate = if goal > 0.5 { 9.0 } else { 2.2 };
-                        d.a = crate::util::approach(d.a, goal, dt * rate);
                     }
                     Tile::Chomper => {
-                        let d = self.dy.at(tx, ty);
-                        d.b += dt;
-                        if d.b >= CHOMP_PERIOD {
-                            d.b -= CHOMP_PERIOD;
+                        if let Some(d) = self.dy.at(tx, ty) {
+                            d.b += dt;
+                            if d.b >= CHOMP_PERIOD {
+                                d.b -= CHOMP_PERIOD;
+                            }
+                            // Long open phase, fast snap — readable and fair.
+                            let f = d.b / CHOMP_PERIOD;
+                            d.a = if f < 0.62 {
+                                0.0
+                            } else if f < 0.72 {
+                                (f - 0.62) / 0.10
+                            } else if f < 0.86 {
+                                1.0
+                            } else {
+                                1.0 - (f - 0.86) / 0.14
+                            };
                         }
-                        // Long open phase, fast snap — readable and fair.
-                        let f = d.b / CHOMP_PERIOD;
-                        d.a = if f < 0.62 {
-                            0.0
-                        } else if f < 0.72 {
-                            (f - 0.62) / 0.10
-                        } else if f < 0.86 {
-                            1.0
-                        } else {
-                            1.0 - (f - 0.86) / 0.14
-                        };
                     }
                     Tile::Loose => {
                         let on = pressed.contains(&(tx, ty));
-                        let d = self.dy.at(tx, ty);
-                        if on && d.flag & F_TRIGGERED == 0 {
-                            d.flag |= F_TRIGGERED;
-                            d.b = LOOSE_FUSE;
-                        }
-                        if d.flag & F_TRIGGERED != 0 {
-                            d.b -= dt;
-                            d.a = (LOOSE_FUSE - d.b) / LOOSE_FUSE;
-                            if d.b <= 0.0 {
-                                self.break_board(tx, ty);
+                        if let Some(d) = self.dy.at(tx, ty) {
+                            if on && d.flag & F_TRIGGERED == 0 {
+                                d.flag |= F_TRIGGERED;
+                                d.b = LOOSE_FUSE;
+                            }
+                            if d.flag & F_TRIGGERED != 0 {
+                                d.b -= dt;
+                                d.a = (LOOSE_FUSE - d.b) / LOOSE_FUSE;
+                                if d.b <= 0.0 {
+                                    self.break_board(tx, ty);
+                                }
                             }
                         }
                     }
@@ -478,10 +484,11 @@ impl Game {
 
     fn break_board(&mut self, tx: i32, ty: i32) {
         self.lv.set_tile(tx, ty, Tile::Space);
-        let d = self.dy.at(tx, ty);
-        d.flag = 0;
-        d.a = 0.0;
-        d.b = 0.0;
+        if let Some(d) = self.dy.at(tx, ty) {
+            d.flag = 0;
+            d.a = 0.0;
+            d.b = 0.0;
+        }
         let col = self.lv.theme.slab_face;
         let x = Level::cx(tx);
         let y = Level::surf(ty);

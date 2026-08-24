@@ -436,7 +436,6 @@ struct Dev {
     shoulder: V2,
     elbow: [V2; 2],
     hand: [V2; 2],
-    neck: V2,
     head: V2,
     /// Head radius, px.
     hr: f32,
@@ -465,7 +464,6 @@ fn dev(cam: &Cam, f: &Figure) -> Dev {
         shoulder: cam.p(f.shoulder),
         elbow: [cam.p(f.elbow[0]), cam.p(f.elbow[1])],
         hand: [cam.p(f.hand[0]), cam.p(f.hand[1])],
-        neck: cam.p(f.neck),
         head: cam.p(f.head),
         hr: cam.l(f.head_r),
         g: cam.l(f.prop.girth * s),
