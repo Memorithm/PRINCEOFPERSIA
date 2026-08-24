@@ -264,7 +264,9 @@ impl Game {
         self.player.p = at.unwrap_or(v2(sx, sy));
         self.player.knock = V2::ZERO;
         self.player.invuln = 0.8;
-        self.warp_grace = 0.7;
+        // Assez long pour ne pas re-déclencher le portail d'arrivée, assez
+        // court pour ne pas traverser le suivant en marchant.
+        self.warp_grace = 0.45;
         if reset_foes {
             let spawns = w.spawns.clone();
             self.foes = spawns
@@ -307,8 +309,14 @@ impl Game {
     fn try_move(&self, p: &mut V2, dx: f32, dy: f32) {
         let r = PLAYER_RADIUS;
         let cand = p.add(v2(dx, dy));
-        let (x0, x1) = ((cand.x - r).floor() as i32, (cand.x + r).floor() as i32);
-        let (y0, y1) = ((cand.y - r).floor() as i32, (cand.y + r).floor() as i32);
+        let (x0, x1) = (
+            ((cand.x - r) / TILE).floor() as i32,
+            ((cand.x + r) / TILE).floor() as i32,
+        );
+        let (y0, y1) = (
+            ((cand.y - r) / TILE).floor() as i32,
+            ((cand.y + r) / TILE).floor() as i32,
+        );
         let mut hit = false;
         'outer: for ty in y0..=y1 {
             for tx in x0..=x1 {
@@ -328,25 +336,31 @@ impl Game {
         // Slide to the wall face on the blocked axis only.
         let nx = if dx != 0.0 {
             if dx > 0.0 {
-                (cand.x + r).floor() as f32 - r - 0.01
+                ((cand.x + r) / TILE).floor() * TILE - r - 0.01
             } else {
-                (cand.x - r).floor() as f32 + 1.0 + r + 0.01
+                ((cand.x - r) / TILE).floor() * TILE + TILE + r + 0.01
             }
         } else {
             p.x
         };
         let ny = if dy != 0.0 {
             if dy > 0.0 {
-                (cand.y + r).floor() as f32 - r - 0.01
+                ((cand.y + r) / TILE).floor() * TILE - r - 0.01
             } else {
-                (cand.y - r).floor() as f32 + 1.0 + r + 0.01
+                ((cand.y - r) / TILE).floor() * TILE + TILE + r + 0.01
             }
         } else {
             p.y
         };
         let probe = v2(nx, ny);
-        let (bx0, bx1) = ((probe.x - r).floor() as i32, (probe.x + r).floor() as i32);
-        let (by0, by1) = ((probe.y - r).floor() as i32, (probe.y + r).floor() as i32);
+        let (bx0, bx1) = (
+            ((probe.x - r) / TILE).floor() as i32,
+            ((probe.x + r) / TILE).floor() as i32,
+        );
+        let (by0, by1) = (
+            ((probe.y - r) / TILE).floor() as i32,
+            ((probe.y + r) / TILE).floor() as i32,
+        );
         let mut bh = false;
         'o2: for ty in by0..=by1 {
             for tx in bx0..=bx1 {

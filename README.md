@@ -44,8 +44,12 @@ cargo run --release --bin pop2d
 
 Un Zelda-like en vue du dessus, rendu en pixel-art 16 bits par le même pipeline
 que le jeu de plateforme : palettes fortes par monde, tuiles à face éclairée,
-eau animée, ombres portées, éclairage en une passe (braseros, portails, fée),
-personnages directionnels animés et vignettage tramé.
+eau animée et scintillante, ombres portées, éclairage en une passe (braseros,
+portails, fée), personnages directionnels animés et vignettage tramé.
+
+Le rendu est vectoriel et sur-échantillonné : il se joue net à la taille du
+terminal et les captures sortent en **800 × 600 natif (SVGA)** — la vue par
+défaut en jeu montre 8 tuiles de haut (prince bien lisible), `+` élargit.
 
 ![La Vallée d'Ispahan](docs/adventure-valley.png)
 
@@ -130,8 +134,9 @@ Chaque monde est une carte ASCII, un caractère par tuile de 24 px :
 ```sh
 pop2d --validate                    # les 15 mondes : parsing + accessibilité + portails
 pop2d --map 6                       # carte ASCII du Désert, cases atteignables marquées
-pop2d --shot capture.png --world 0 --at 26,20    # capture PNG pleine résolution
+pop2d --shot capture.png --world 0 --at 26,20    # capture PNG 800x600 (SVGA natif)
 pop2d --shot boss.png --world 5 --at 30,23 --frames 30   # avec 30 frames de simulation
+pop2d --shot big.png --size 1024x768 --zoom 2            # autre résolution, upscale x2
 ```
 
 `--validate` vérifie pour chaque monde : largeurs de lignes, départ unique,

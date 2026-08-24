@@ -22,8 +22,9 @@ const FRAME_60: Duration = Duration::from_micros(16_667);
 /// Fixed simulation step, as in the classic engine.
 const SIM_DT: f32 = 1.0 / 120.0;
 const MAX_CATCHUP: f32 = 0.25;
-/// View heights in tiles, per zoom step.
-const VIEWS_TALL: [f32; 4] = [11.0, 13.0, 15.0, 18.0];
+/// View heights in tiles, per zoom step. The default (8 tiles) keeps the
+/// prince at a readable size even on a 30-row terminal; `+` widens the view.
+const VIEWS_TALL: [f32; 4] = [8.0, 10.0, 13.0, 16.0];
 const MIN_COLS: i32 = 56;
 const MIN_ROWS: i32 = 14;
 
@@ -85,7 +86,7 @@ impl App {
             menu_sel: 0,
             total_time: 0.0,
             seed,
-            zoom_ix: 1,
+            zoom_ix: 0,
             acc: 0.0,
             frame: FRAME_60,
             dead_t: 0.0,
@@ -103,8 +104,8 @@ impl App {
         let vh = TILE * VIEWS_TALL[self.zoom_ix.min(VIEWS_TALL.len() - 1)];
         let vw = vh * aspect;
         self.game.set_view_size(vw, vh);
-        let mut ss = (pw as f32 / vw * 1.4).clamp(2.0, 3.5);
-        while vw * ss * vh * ss > 430_000.0 && ss > 1.0 {
+        let mut ss = (pw as f32 / vw * 1.4).clamp(2.0, 4.0);
+        while vw * ss * vh * ss > 620_000.0 && ss > 1.0 {
             ss -= 0.25;
         }
         self.ss = ss;
