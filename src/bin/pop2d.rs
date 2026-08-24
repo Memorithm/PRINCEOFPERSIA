@@ -21,8 +21,8 @@ OPTIONS
         --world <W>     (avec --shot) monde à cadrer
         --at <TX,TY>    (avec --shot) placer le prince sur cette tuile
         --frames <N>    (avec --shot) simuler N images avant la capture
-        --size <LxH>    taille de la capture en pixels
-        --zoom <N>      agrandissement entier du PNG
+        --size <LxH>    taille de la capture en pixels (défaut 800x600, SVGA)
+        --zoom <N>      agrandissement entier du PNG (1 = résolution native)
     -h, --help          afficher cette aide
 
 COMMANDES EN JEU
@@ -41,7 +41,7 @@ fn main() {
     let mut at: Option<(i32, i32)> = None;
     let mut frames = 20i32;
     let mut size: Option<(i32, i32)> = None;
-    let mut zoom = 3i32;
+    let mut zoom = 1i32;
 
     let mut i = 0;
     while i < args.len() {
@@ -77,7 +77,7 @@ fn main() {
                 size = parse_size(&next(&mut i))
                     .map(|(w, h)| (w.clamp(8, 4096), h.clamp(8, 4096)))
             }
-            "--zoom" => zoom = next(&mut i).parse::<i32>().unwrap_or(3).clamp(1, 16),
+            "--zoom" => zoom = next(&mut i).parse::<i32>().unwrap_or(1).clamp(1, 16),
             other => {
                 eprintln!("option inconnue : {other}\n");
                 print!("{USAGE}");
@@ -257,7 +257,9 @@ fn screenshot(
         (ty as f32 + 0.5) * world::TILE,
     );
 
-    let (pw, ph) = size.unwrap_or((480, 264));
+    // SVGA minimum : la capture rend en natif 800x600 (aucun upscale flou).
+    let (pw, ph) = size.unwrap_or((800, 600));
+    let (pw, ph) = (pw.max(320), ph.max(240));
     let view_h = world::TILE * 13.0;
     let view_w = view_h * pw as f32 / ph as f32;
     g.set_view_size(view_w, view_h);

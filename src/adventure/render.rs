@@ -470,6 +470,14 @@ fn draw_tile(g: &Game, t: &mut Canvas, cam: &Cam, tx: i32, ty: i32, time: f32) {
                 let wx = x + 4.0 + ((phase * 0.7).sin() * 0.5 + 0.5) * 6.0;
                 wline(t, cam, v2(wx, wy), v2(wx + 9.0, wy), 1.6, p.water_hi);
             }
+            // Occasional sun glints.
+            let tw = (time * 1.6 + hf(8) * std::f32::consts::TAU).sin();
+            if tw > 0.86 {
+                let gx = x + 5.0 + hf(9) * 14.0;
+                let gy = y + 5.0 + hf(10) * 14.0;
+                let g = (tw - 0.86) / 0.14;
+                wcircle(t, cam, v2(gx, gy), 1.6 * g, rgb(240, 250, 255), 6);
+            }
             // Foam on shores facing land.
             let up = !g.world().tile(tx, ty - 1).solid();
             let left = !g.world().tile(tx - 1, ty).solid();
