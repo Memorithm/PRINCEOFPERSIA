@@ -366,7 +366,7 @@ fn wrect(t: &mut impl Target, cam: &Cam, x: f32, y: f32, w: f32, h: f32, col: Rg
 }
 
 /// Filled circle (world centre, world radius).
-fn wcircle(t: &mut impl Target, cam: &Cam, c: V2, r: f32, col: Rgb, n: usize) {
+pub(crate) fn wcircle(t: &mut impl Target, cam: &Cam, c: V2, r: f32, col: Rgb, n: usize) {
     let cc = cam.p(c);
     let rr = cam.l(r);
     let mut pts = Vec::with_capacity(n);
@@ -377,8 +377,14 @@ fn wcircle(t: &mut impl Target, cam: &Cam, c: V2, r: f32, col: Rgb, n: usize) {
     poly(t, &pts, col);
 }
 
-fn wline(t: &mut impl Target, cam: &Cam, a: V2, b: V2, wdt: f32, col: Rgb) {
+pub(crate) fn wline(t: &mut impl Target, cam: &Cam, a: V2, b: V2, wdt: f32, col: Rgb) {
     crate::art::shape::contour(t, cam.p(a), cam.p(b), cam.l(wdt), col, 1.0);
+}
+
+/// Filled polygon given in world coordinates.
+pub(crate) fn wpoly(t: &mut impl Target, cam: &Cam, pts: &[V2], col: Rgb) {
+    let screen: Vec<V2> = pts.iter().map(|p| cam.p(*p)).collect();
+    poly(t, &screen, col);
 }
 
 /// Soft round shadow under an entity — two nested ellipses fake a blur.
