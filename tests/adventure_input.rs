@@ -150,3 +150,83 @@ fn walking_into_a_portal_changes_world() {
     }
     panic!("le prince n'est jamais entré dans le portail, monde courant : {}", g.cur);
 }
+
+// ------------------------------------------------------------------ combat
+
+use prince_of_persia_rs::adventure::Foe;
+use prince_of_persia_rs::adventure::world::FoeKind;
+use prince_of_persia_rs::util::v2;
+
+fn lone_foe(g: &mut Game, kind: FoeKind, offset: (f32, f32)) {
+    let fp = g.player.p.add(v2(offset.0, offset.1));
+    g.foes.clear();
+    g.foes.push(Foe {
+        kind,
+        home: fp,
+        p: fp,
+        hp: kind.max_hp(),
+        dir: v2(-1.0, 0.0),
+        t: 1.0,
+        cd: 9.0,
+        hurt_t: 0.0,
+        knock: V2_ZERO,
+        alive: true,
+        anim: 0.0,
+    });
+}
+
+use prince_of_persia_rs::util::V2;
+const V2_ZERO: prince_of_persia_rs::util::V2 = prince_of_persia_rs::util::V2 { x: 0.0, y: 0.0 };
+
+fn face_and_swing(g: &mut Game, steps: u32) {
+    // Regarde à droite et maintient l'attaque : l'auto-répétition frappe
+    // dès que le cooldown le permet.
+    let mut inp = prince_of_persia_rs::input::Input::default();
+    inp.right = true;
+    inp.attack_held = true;
+    for _ in 0..steps {
+        g.update(1.0 / 120.0, &inp);
+    }
+}
+
+#[test]
+fn one_blow_fells_a_crab() {
+    let mut g = Game::new(9).expect("mondes valides");
+    lone_foe(&mut g, FoeKind::Crab, (14.0, 0.0));
+    face_and_swing(&mut g, 30); // un coup (0,25 s)
+    assert!(!g.foes[0].alive, "un Craboroc tombe d'un coup");
+}
+
+#[test]
+fn holding_attack_repeats_and_fells_a_grunt() {
+    let mut g = Game::new(9).expect("mondes valides");
+    lone_foe(&mut g, FoeKind::Grunt, (14.0, 0.0));
+    face_and_swing(&mut g, 90); // ~3 coups en 0,75 s
+    assert!(
+        !g.foes[0].alive,
+        "garder Espace enfoncé doit enchaîner les coups (hp restant : {})",
+        g.foes[0].hp
+    );
+}
+
+#[test]
+fn a_blow_knocks_the_foe_back() {
+    let mut g = Game::new(9).expect("mondes valides");
+    lone_foe(&mut g, FoeKind::Grunt, (14.0, 0.0));
+    let before = g.foes[0].p;
+    // Un seul coup, sans laisser l'ennemi se rétablir.
+    let mut inp = prince_of_persia_rs::input::Input::default();
+    inp.right = true;
+    inp.attack = true;
+    g.update(1.0 / 120.0, &inp);
+    for _ in 0..12 {
+        g.update(1.0 / 120.0, &inp2_idle());
+    }
+    let pushed = g.foes[0].p.x - before.x;
+    assert!(pushed > 6.0, "l'ennemi doit reculer sous le coup (+{pushed}px)");
+    assert!(g.foes[0].hp < FoeKind::Grunt.max_hp(), "l'ennemi doit être blessé");
+}
+
+fn inp2_idle() -> prince_of_persia_rs::input::Input {
+    prince_of_persia_rs::input::Input::default()
+}

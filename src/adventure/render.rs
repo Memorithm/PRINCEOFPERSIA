@@ -381,17 +381,20 @@ fn wline(t: &mut impl Target, cam: &Cam, a: V2, b: V2, wdt: f32, col: Rgb) {
     crate::art::shape::contour(t, cam.p(a), cam.p(b), cam.l(wdt), col, 1.0);
 }
 
-/// Soft round shadow under an entity.
+/// Soft round shadow under an entity — two nested ellipses fake a blur.
 fn shadow(t: &mut impl Target, cam: &Cam, at: V2, rx: f32, ry: f32, alpha: f32) {
     let c = cam.p(at);
-    let (rx, ry) = (cam.l(rx), cam.l(ry));
     let n = 14;
     let mut pts = Vec::with_capacity(n);
     for i in 0..n {
         let a = i as f32 / n as f32 * std::f32::consts::TAU;
-        pts.push(v2(c.x + a.cos() * rx, c.y + a.sin() * ry));
+        pts.push(v2(a.cos(), a.sin()));
     }
-    crate::art::shape::flat(t, &pts, Rgb::BLACK, alpha * 0.35);
+    for (scale, k) in [(1.25f32, 0.45f32), (0.92, 0.75)] {
+        let (rx, ry) = (cam.l(rx * scale), cam.l(ry * scale));
+        let ring: Vec<V2> = pts.iter().map(|d| v2(c.x + d.x * rx, c.y + d.y * ry)).collect();
+        crate::art::shape::flat(t, &ring, Rgb::BLACK, alpha * 0.35 * k);
+    }
 }
 
 // ---------------------------------------------------------------- terrain
@@ -407,7 +410,12 @@ fn draw_tile(g: &Game, t: &mut Canvas, cam: &Cam, tx: i32, ty: i32, time: f32) {
 
     match tile {
         Tile::Grass | Tile::Flower => {
-            let base = if hf(1) < 0.5 { p.ground_a } else { p.ground_b };
+            // Slow, organic drift of tone across the meadow — no checkerboard.
+            let drift = (noise1(x * 0.021 + y * 0.029, 11) * 0.5 + 0.5).clamp(0.0, 1.0);
+            let base = p
+                .ground_a
+                .lerp(p.ground_b, drift)
+                .lerp(p.ground_speck, (drift - 0.5).abs() * 0.5);
             wrect(t, cam, x, y, TILE + 0.5, TILE + 0.5, base);
             // Tufts of grass.
             let tufts = 3 + (h % 3) as usize;
@@ -432,7 +440,11 @@ fn draw_tile(g: &Game, t: &mut Canvas, cam: &Cam, tx: i32, ty: i32, time: f32) {
             }
         }
         Tile::Floor | Tile::Portal | Tile::Cave | Tile::MirrorSlab => {
-            let base = if hf(1) < 0.5 { p.ground_a } else { p.ground_b };
+            let drift = (noise1(x * 0.025 + y * 0.033, 13) * 0.5 + 0.5).clamp(0.0, 1.0);
+            let base = p
+                .ground_a
+                .lerp(p.ground_b, drift)
+                .lerp(p.ground_speck, (drift - 0.5).abs() * 0.4);
             wrect(t, cam, x, y, TILE + 0.5, TILE + 0.5, base);
             // Speckles + faint slab seams.
             for k in 0..4 {
@@ -1648,14 +1660,14 @@ pub fn draw(g: &Game, cv: &mut Canvas, layer: &mut Layer, light: &mut LightField
     }
     light.apply(cv);
 
-    // Post: gentle vignette + ordered dither for the retro finish.
+    // Post: a whisper of vignette — no dithering, the look stays smooth and
+    // fine-grained rather than retro-pixelated.
     let vig_tint = match g.theme() {
         ThemeName::Valley => rgb(40, 30, 20),
         ThemeName::Palace => rgb(40, 30, 24),
         _ => rgb(14, 8, 22),
     };
-    cv.vignette(0.34, vig_tint);
-    crate::gfx::canvas::dither(cv, 5.0);
+    cv.vignette(0.16, vig_tint);
 
     // Emissive overlay (flames etc.) drawn additively on top.
     cv.blend = Blend::Add;

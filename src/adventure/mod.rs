@@ -21,13 +21,15 @@ use world::{FoeKind, Pickup, Portal, ThemeName, Tile, World, LIGHT_REALM, TILE, 
 pub const PLAYER_SPEED: f32 = 92.0;
 pub const PLAYER_RADIUS: f32 = 7.0;
 /// Duration of a sword stroke, seconds.
-pub const ATTACK_TIME: f32 = 0.22;
+pub const ATTACK_TIME: f32 = 0.18;
 /// Recovery between strokes.
-pub const ATTACK_COOLDOWN: f32 = 0.34;
+pub const ATTACK_COOLDOWN: f32 = 0.26;
 /// How far in front of him the blade bites.
-pub const SWORD_REACH: f32 = 15.0;
+pub const SWORD_REACH: f32 = 18.0;
 /// Radius of the bite.
-pub const SWORD_ARC: f32 = 13.0;
+pub const SWORD_ARC: f32 = 16.0;
+/// Foes knocked back by a blow fly at this speed.
+pub const FOE_KNOCKBACK: f32 = 170.0;
 /// Invulnerability after taking a hit.
 pub const HURT_INVULN: f32 = 1.0;
 pub const KNOCKBACK: f32 = 130.0;
@@ -109,6 +111,8 @@ pub struct Foe {
     pub cd: f32,
     /// Hit-flash timer.
     pub hurt_t: f32,
+    /// Knockback velocity from the prince's blade, decays fast.
+    pub knock: V2,
     pub alive: bool,
     /// Animation phase.
     pub anim: f32,
@@ -281,6 +285,7 @@ impl Game {
                     t: self.rng.range(0.0, 1.0),
                     cd: self.rng.range(0.4, 1.6),
                     hurt_t: 0.0,
+                    knock: V2::ZERO,
                     alive: true,
                     anim: self.rng.unit() * 10.0,
                 })
@@ -476,7 +481,7 @@ impl Game {
             }
         }
 
-        let swung = input.attack && pl.cooldown <= 0.0;
+        let swung = (input.attack || input.attack_held) && pl.cooldown <= 0.0;
         if swung {
             pl.attack_t = ATTACK_TIME;
             pl.cooldown = ATTACK_COOLDOWN;
@@ -523,6 +528,11 @@ impl Game {
             foe.hp -= dmg;
             foe.hurt_t = 0.18;
             foe.dir = f.mul(-1.0); // stagger backwards
+            // The blow sends the foe flying away from the prince; bosses
+            // barely budge.
+            let kb = if foe.kind.is_boss() { 0.45 } else { 1.0 };
+            foe.knock = f.mul(FOE_KNOCKBACK * kb);
+            foe.t = foe.t.max(0.28); // brief stun: the AI loses its beat
             let heavy = dmg > 1;
             self.fx.sparks(
                 foe.p.add(v2(0.0, -4.0)),
@@ -542,6 +552,7 @@ impl Game {
         };
         self.foes[ix].alive = false;
         self.kills += 1;
+        self.cam_shake = self.cam_shake.max(0.35);
         self.fx.sparks(fp, 16, 1.4);
         self.fx
             .dust(fp, 8, 1.0, crate::gfx::color::rgb(160, 150, 140));
@@ -665,6 +676,7 @@ impl Game {
             }
             foe.anim += dt * (if foe.kind == FoeKind::Bat { 14.0 } else { 6.0 });
             foe.hurt_t = (foe.hurt_t - dt).max(0.0);
+            foe.knock = foe.knock.mul((-dt * 9.0).exp());
             foe.cd -= dt;
             foe.t -= dt;
             let to_pl = pl_p.sub(foe.p);
@@ -875,6 +887,8 @@ impl Game {
                 }
             }
 
+            // Knockback from the prince's blade dominates while it lasts.
+            let vel = if foe.knock.len() > 4.0 { foe.knock } else { vel };
             if vel.len() > 0.5 {
                 let nx = foe.p.x + vel.x * dt;
                 if free(v2(nx, foe.p.y), 6.0) {
@@ -919,6 +933,7 @@ impl Game {
                     t: 1.0,
                     cd: 1.0,
                     hurt_t: 0.0,
+                    knock: V2::ZERO,
                     alive: true,
                     anim: 0.0,
                 });

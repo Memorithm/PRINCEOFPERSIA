@@ -42,10 +42,11 @@ le test d'intégration.
 cargo run --release --bin pop2d
 ```
 
-Un Zelda-like en vue du dessus, rendu en pixel-art 16 bits par le même pipeline
+Un Zelda-like en vue du dessus, rendu en vectoriel lisse par le même pipeline
 que le jeu de plateforme : palettes fortes par monde, tuiles à face éclairée,
-eau animée et scintillante, ombres portées, éclairage en une passe (braseros,
-portails, fée), personnages directionnels animés et vignettage tramé.
+eau animée et scintillante, ombres portées douces, éclairage en une passe
+(braseros, portails, fée), personnages directionnels animés, sols aux tons
+organiques — sans trame ni pixelisation volontaire.
 
 Le rendu est vectoriel et sur-échantillonné : il se joue net à la taille du
 terminal et les captures sortent en **800 × 600 natif (SVGA)** — la vue par
